@@ -1,10 +1,11 @@
+require("dotenv").config();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const pdf = require("pdf-extraction"); // NEW LIBRARY
 const fs = require("fs");
-require("dotenv").config();
+const chatStore = require("../utils/store.js")
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
 let chatHistory = {};
 
@@ -86,7 +87,7 @@ const startInterviewController = async (req, res) => {
 		);
 		const response = result.response.text();
 
-		chatHistory["user1"] = chat;
+		chatStore.setSession("user1",chat)
 
 		res.json({ message: response });
 	} catch (error) {

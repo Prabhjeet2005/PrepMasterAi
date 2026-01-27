@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mic Test</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>🎤 Microphone Test</h1>
+    <button id="startBtn">Start Recording</button>
+    <p id="status">Status: Disconnected</p>
+    <div id="output" style="border:1px solid #ccc; padding:10px; min-height:100px;"></div>
+
+    <script>
+        const socket = io("http://localhost:5001");
+        let mediaRecorder;
+
+        socket.on("connect", () => {
+            document.getElementById("status").innerText = "Status: Connected ✅";
+        });
+
+        // Listen for transcripts from server
+        socket.on("transcript-result", (text) => {
+            document.getElementById("output").innerText += text + " ";
+        });
+
+        socket.on("ai-response", (text) => {
+            const box = document.getElementById("output");
+            box.innerHTML += `<br><strong>🤖 AI:</strong> ${text}<br>`;
+            
+            // BONUS: Make the browser speak the AI text (Free TTS!)
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        });
+
+        document.getElementById("startBtn").onclick = async () => {
+            // 1. Tell server to start listening
+            socket.emit("start-interview");
+            document.getElementById("status").innerText = "Status: 🔴 Recording...";
+
+            // 2. Get Mic Access
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+            // 3. Send audio chunks every 250ms
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    socket.emit("audio-stream", event.data);
+                }
+            };
+
+            mediaRecorder.start(250);
+        };
+    </script>
+</body>
+</html>
