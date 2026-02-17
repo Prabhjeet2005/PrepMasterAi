@@ -15,37 +15,46 @@
     <script>
         const socket = io("http://localhost:5001");
         let mediaRecorder;
+        let isAiSpeaking = false; // <--- NEW FLAG
 
         socket.on("connect", () => {
             document.getElementById("status").innerText = "Status: Connected ✅";
         });
 
-        // Listen for transcripts from server
         socket.on("transcript-result", (text) => {
             document.getElementById("output").innerText += text + " ";
         });
 
+        // UPDATED: Handle AI Response
         socket.on("ai-response", (text) => {
+            // 1. Mark AI as speaking
+            isAiSpeaking = true; 
+            document.getElementById("status").innerText = "Status: 🤖 AI Speaking (Mic Paused)";
+            
             const box = document.getElementById("output");
             box.innerHTML += `<br><strong>🤖 AI:</strong> ${text}<br>`;
             
-            // BONUS: Make the browser speak the AI text (Free TTS!)
             const utterance = new SpeechSynthesisUtterance(text);
+            
+            // 2. When AI finishes talking, turn Mic back on
+            utterance.onend = () => {
+                isAiSpeaking = false;
+                document.getElementById("status").innerText = "Status: 🔴 Recording...";
+            };
+            
             window.speechSynthesis.speak(utterance);
         });
 
         document.getElementById("startBtn").onclick = async () => {
-            // 1. Tell server to start listening
             socket.emit("start-interview");
             document.getElementById("status").innerText = "Status: 🔴 Recording...";
 
-            // 2. Get Mic Access
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
 
-            // 3. Send audio chunks every 250ms
             mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
+                // 3. ONLY SEND IF AI IS NOT SPEAKING
+                if (event.data.size > 0 && !isAiSpeaking) {
                     socket.emit("audio-stream", event.data);
                 }
             };

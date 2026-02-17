@@ -1,7 +1,7 @@
 // sockets/socketHandler.js
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 const dotenv = require("dotenv");
-const chatStore = require('../utils/store');
+const aiService = require("../services/ai.service");
 
 dotenv.config();
 
@@ -59,28 +59,27 @@ const setupSocket = (io) => {
 				const transcript = data.channel.alternatives[0].transcript;
 				if (transcript && data.is_final) {
             console.log("🗣️ User Finished Speaking:", transcript);
-            
-            // 2. GET THE AI BRAIN
-            const chatSession = chatStore.getSession("user1");
-
-            if (chatSession) {
                 try {
                     // 3. ASK GEMINI
-                    console.log("🤖 Asking Gemini...");
-                    const result = await chatSession.sendMessage(transcript);
-                    const aiResponse = result.response.text();
-                    
-                    console.log("🤖 Gemini Answer:", aiResponse);
+                    console.log("🤖 Asking AI...");
+										const aiResponse = await aiService.sendMessage(
+											"user1",
+											transcript,
+										);
+                    console.log("🤖 Ai Reply:", aiResponse);
 
                     // 4. SEND BACK TO FRONTEND
                     socket.emit("ai-response", aiResponse);
                 } catch (err) {
-                    console.error("Gemini Error:", err);
+                    console.error("Ai Service Error:", err?.message);
+										if (err.message.includes("No active session")) {
+											socket.emit(
+												"ai-response",
+												"Please upload your resume to start the interview first.",
+											);
+										}
                 }
-            } else {
-                console.log("⚠️ No active Interview found for user1");
-                socket.emit("error", "Interview not started. Upload resume first.");
-            }
+             
         }
 			});
 

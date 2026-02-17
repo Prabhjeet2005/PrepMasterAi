@@ -1,11 +1,7 @@
 require("dotenv").config();
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const aiService = require('../services/ai.service.js'); // Import the adapter
 const pdf = require("pdf-extraction"); // NEW LIBRARY
 const fs = require("fs");
-const chatStore = require("../utils/store.js")
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
 let chatHistory = {};
 
@@ -32,13 +28,10 @@ const extractTextFromPDF = async (buffer) => {
 // 1. Start the Interview
 const startInterviewController = async (req, res) => {
 	try {
-		console.log("📥 Request Body:", req?.body);
-
 		let resumeText = "";
 
 		// OPTION A: File Uploaded
 		if (req.file) {
-			console.log("📂 File received:", req.file.originalname);
 			resumeText = await extractTextFromPDF(req.file.buffer);
 		}
 		// OPTION B: No File (For testing)
@@ -72,24 +65,9 @@ const startInterviewController = async (req, res) => {
         `;
 
 		// 4. Initialize Chat
-		const chat = model.startChat({
-			history: [
-				{
-					role: "user",
-					parts: [{ text: systemInstruction }],
-				},
-			],
-		});
-
-		// 5. Send dummy trigger
-		const result = await chat.sendMessage(
-			"I am ready. Ask me the first question based on my resume.",
-		);
-		const response = result.response.text();
-
-		chatStore.setSession("user1",chat)
-
+		const response = await aiService.startChat("user1", systemInstruction);
 		res.json({ message: response });
+		
 	} catch (error) {
 		console.error("Error starting interview:", error);
 		res
@@ -100,22 +78,12 @@ const startInterviewController = async (req, res) => {
 
 // 2. Chat Loop
 const chatWithAIController = async (req, res) => {
-	const { userAnswer } = req.body;
-	const chat = chatHistory["user1"];
-
-	if (!chat) {
-		return res
-			.status(400)
-			.json({ error: "Interview not started. Upload resume first." });
-	}
-
 	try {
-		const result = await chat.sendMessage(userAnswer);
-		const response = result.response.text();
+		const { userAnswer } = req.body;
+		const response = await aiService.sendMessage("user1", userAnswer);
 		res.json({ message: response });
 	} catch (error) {
-		console.error(error);
-		res.status(500).json({ error: "AI Error" });
+		res.status(500).json({ error: error.message });
 	}
 };
 

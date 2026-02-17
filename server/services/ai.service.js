@@ -1,32 +1,90 @@
-const OpenAI = require("openai");
+// services/aiService.js
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk");
+require("dotenv").config();
 
+class AIService {
+	constructor() {
+		// 1. Initialize Providers
+		this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+		this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const openai = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY,
-});
+		// 2. In-Memory Storage for Chat Sessions
+		this.sessions = {};
+	}
 
-// The "Brain" of your interviewer
-const generateInterviewResponse = async (userMessage, chatHistory) => {
-	const systemPrompt = `
-    You are a Senior Software Engineer at Google conducting a technical interview.
-    - Your tone is professional, slightly challenging, but encouraging.
-    - Do NOT give long lectures. Keep responses under 3 sentences unless explaining a complex solution.
-    - Ask ONE follow-up question at a time.
-    - If the user is wrong, correct them gently but firmly.
-    - Focus on: Data Structures, System Design, and Full Stack Development.
-  `;
+	getProvider() {
+		return process.env.CURRENT_AI_PROVIDER || "GEMINI";
+	}
 
-	// We send the history so the AI remembers the conversation
-	const completion = await openai.chat.completions.create({
-		model: "gpt-3.5-turbo", // or gpt-3.5-turbo for lower cost
-		messages: [
-			{ role: "system", content: systemPrompt },
-			...chatHistory, // Previous Q&A
-			{ role: "user", content: userMessage },
-		],
-	});
+	async startChat(userId, systemInstruction) {
+		const provider = this.getProvider();
+		console.log(`🧠 Initializing Chat for ${userId} using ${provider}`);
 
-	return completion.choices[0].message.content;
-};
+		if (provider === "GEMINI") {
+			const model = this.genAI.getGenerativeModel({
+				model: process.env.GEMINI_MODEL,
+			});
 
-module.exports = { generateInterviewResponse };
+			const chat = model.startChat({
+				history: [{ role: "user", parts: [{ text: systemInstruction }] }],
+			});
+
+			// Dummy message to "warm up" the conversation
+			const result = await chat.sendMessage(
+				"I am ready. Ask the first question.",
+			);
+
+			// SAVE THE SESSION
+			this.sessions[userId] = { type: "GEMINI", chat: chat };
+
+			return result.response.text();
+		} else if (provider === "GROQ") {
+			// Groq is stateless, so we store the array of messages
+			this.sessions[userId] = {
+				type: "GROQ",
+				history: [
+					{ role: "system", content: systemInstruction },
+					{ role: "user", content: "I am ready. Ask the first question." },
+				],
+			};
+
+			return await this.generateGroqResponse(userId);
+		}
+	}
+
+	async sendMessage(userId, userMessage) {
+		const session = this.sessions[userId];
+		if (!session) {
+			throw new Error(
+				"No active session found. Please upload resume first.",
+			);
+		}
+
+		if (session.type === "GEMINI") {
+			const result = await session.chat.sendMessage(userMessage);
+			return result.response.text();
+		} else if (session.type === "GROQ") {
+			session.history.push({ role: "user", content: userMessage });
+			return await this.generateGroqResponse(userId);
+		}
+	}
+
+	async generateGroqResponse(userId) {
+		const session = this.sessions[userId];
+
+		const completion = await this.groq.chat.completions.create({
+			messages: session.history,
+			model: process.env.GROQ_MODEL,
+			temperature: 0.6,
+		});
+
+		const answer = completion.choices[0]?.message?.content || "";
+		session.history.push({ role: "assistant", content: answer });
+
+		return answer;
+	}
+}
+
+// Export as a Singleton (New instance created immediately)
+module.exports = new AIService();
