@@ -8,6 +8,7 @@ import {
 	User,
 	Bot,
 	MessageSquare,
+	Volume2,
 } from "lucide-react";
 import { io } from "socket.io-client";
 import { useRouter } from "next/navigation";
@@ -30,6 +31,25 @@ export default function InterviewPage() {
 
 	// --- 1. SETUP SOCKET & EVENTS ---
 	useEffect(() => {
+    const initialMsg = localStorage.getItem("initialAiMessage");
+		if (initialMsg) {
+			setAiSpeaking(true);
+			setCurrentSpeech(initialMsg); // Show in bubble
+			addMessage("ai", initialMsg); // Add to chat log
+
+			// Speak it
+			const utterance = new SpeechSynthesisUtterance(initialMsg);
+			utterance.onend = () => {
+				setAiSpeaking(false);
+				setCurrentSpeech("");
+				setStatus("Your turn...");
+			};
+			window.speechSynthesis.speak(utterance);
+
+			// Clear it so it doesn't play again on refresh
+			localStorage.removeItem("initialAiMessage");
+		}
+
 		const newSocket = io(process.env.NEXT_PUBLIC_API_URL);
 		setSocket(newSocket);
 

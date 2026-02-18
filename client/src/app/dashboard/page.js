@@ -41,6 +41,9 @@ export default function Dashboard() {
 				},
 			);
 
+      if (res.data.message) {
+				localStorage.setItem("initialAiMessage", res.data.message);
+			}
 			// 3. Save Interview ID & Redirect
 			// Ideally, the backend should return the ID. For now, we assume success.
 			// We'll use "user1" as our session key for the WebSocket later.
