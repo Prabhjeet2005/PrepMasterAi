@@ -41,7 +41,7 @@ class AIService {
 
 			// Dummy message to "warm up" the conversation
 			const result = await chat.sendMessage(
-				"I am ready. Ask the first question.",
+				"I am ready. Please start the interview with a professional introduction (1 sentence) and then ask the first question based on my resume.",
 			);
 
 			const text = result.response.text();
@@ -133,24 +133,27 @@ class AIService {
 			.join("\n");
 
 		const systemPrompt = `
-        You are a Senior Technical Recruiter. Analyze the following interview transcript.
+        You are a strict Senior Technical Recruiter. Analyze the following interview transcript.
         
         Transcript:
         ${conversationText}
         
         Task: Generate a structured feedback report in STRICT JSON format.
-        Focus on:
-        1. Technical Accuracy (Did they know the answers?)
-        2. Communication (Were they clear?)
         
-        Output Format (JSON ONLY, no markdown):
+        GRADING RUBRIC (FOLLOW STRICTLY):
+        1. Short Answers (1-2 sentences) = Max Score 3/10.
+        2. Vague/Generic Answers = Max Score 5/10.
+        3. Good Technical Depth = Score 7-8/10.
+        4. Exceptional/Architectural Depth = Score 9-10/10.
+        
+        Output Format (JSON ONLY):
         {
             "overallScore": (0-10),
             "technicalAccuracy": (0-10),
             "communicationSkills": (0-10),
             "strengths": ["point 1", "point 2"],
             "weaknesses": ["point 1", "point 2"],
-            "improvementTips": "Summary of how to improve..."
+            "improvementTips": "Specific technical advice..."
         }
     `;
 
