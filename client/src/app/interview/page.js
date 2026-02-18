@@ -13,6 +13,7 @@ import {
 import { io } from "socket.io-client";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import axios from "axios";
 
 export default function InterviewPage() {
 	const router = useRouter();
@@ -35,6 +36,7 @@ export default function InterviewPage() {
 
 	const mediaRecorderRef = useRef(null);
 	const messagesEndRef = useRef(null);
+  const audioRef = useRef(null);
 
 	// --- 1. INITIALIZATION & SOCKET ---
 	useEffect(() => {
@@ -85,49 +87,45 @@ export default function InterviewPage() {
 		};
 	}, []);
 
-	// --- 2. AUDIO HANDLER (THE FIX) ---
-	const handleAiSpeech = (text) => {
+	const handleAiSpeech = async (text) => {
 		setAiSpeaking(true);
 		setQuestionBubble(text);
 		addMessage("ai", text);
+		setStatus("AI Speaking");
 
-		// 1. Safety Cancel
-		window.speechSynthesis.cancel();
+		try {
+			// 1. Fetch Audio from Backend
+			const response = await axios.post(
+				`${process.env.NEXT_PUBLIC_API_URL}/api/interview/speak`,
+				{ text },
+				{ responseType: "blob" }, // Important for audio
+			);
 
-		// 2. Create Utterance
-		const utterance = new SpeechSynthesisUtterance(text);
+			// 2. Play It
+			const audioUrl = URL.createObjectURL(response.data);
+			const audio = new Audio(audioUrl);
+			audioRef.current = audio;
 
-		// 3. Robust Voice Selection
-		const preferred =
-			voices.find((v) => v.lang.includes("en-US")) || voices[0];
-		if (preferred) utterance.voice = preferred;
-		utterance.rate = 1.0;
+			audio.onended = () => {
+				setAiSpeaking(false);
+				setStatus("Ready");
+			};
 
-		// 4. GLOBAL REFERENCE (Fixes the Garbage Collection Bug)
-		window.currentUtterance = utterance;
-
-		utterance.onstart = () => setStatus("AI Speaking");
-
-		utterance.onend = () => {
-			setAiSpeaking(false);
-			setStatus("Ready");
-		};
-
-		utterance.onerror = (e) => {
-			console.error("Audio Error:", e);
+			audio.play();
+		} catch (err) {
+			console.error("TTS Error:", err);
 			setAiSpeaking(false);
 			setStatus("Audio Error");
-		};
-
-		// 5. Speak
-		window.speechSynthesis.speak(utterance);
+		}
 	};
 
 	// --- 3. MIC CONTROLS ---
 	const startRecording = async () => {
 		try {
-			// Safety: Stop AI if it's talking
-			window.speechSynthesis.cancel();
+			if (audioRef.current) {
+				audioRef.current.pause();
+				audioRef.current.currentTime = 0;
+			}
 			setAiSpeaking(false);
 
 			const stream = await navigator.mediaDevices.getUserMedia({
@@ -167,9 +165,14 @@ export default function InterviewPage() {
 	};
 
 	const interruptAi = () => {
-		window.speechSynthesis.cancel();
+		if (audioRef.current) {
+			audioRef.current.pause();
+			audioRef.current.currentTime = 0; // Reset to start
+		}
+
+		// 2. Update UI
 		setAiSpeaking(false);
-		setStatus("Interrupted");
+		setStatus("Interrupted 🛑");
 	};
 
 	// --- 4. HELPERS ---

@@ -1,5 +1,10 @@
 const express = require("express");
-const { startInterviewController, chatWithAIController, generateFeedbackController } = require("../controllers/interview.controller");
+const {
+	startInterviewController,
+	chatWithAIController,
+	generateFeedbackController,
+	speakController,
+} = require("../controllers/interview.controller");
 const upload = require("../middlewares/upload.middleware");
 const interviewRouter = express.Router();
 
@@ -10,5 +15,7 @@ interviewRouter.post("/start", upload.single("resume"),startInterviewController)
 interviewRouter.post("/chat", chatWithAIController);
 
 interviewRouter.post("/feedback",generateFeedbackController)
+
+interviewRouter.post("/speak", speakController);
 
 module.exports = interviewRouter;

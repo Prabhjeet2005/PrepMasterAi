@@ -101,4 +101,23 @@ const generateFeedbackController = async (req, res) => {
 	}
 };
 
-module.exports = { chatWithAIController, startInterviewController, generateFeedbackController };
+const speakController = async (req, res) => {
+	try {
+		const { text } = req.body;
+		if (!text) return res.status(400).json({ error: "Text required" });
+
+		const audioBuffer = await aiService.generateAudio(text);
+
+		// Send Audio File back to frontend
+		res.set({
+			"Content-Type": "audio/wav",
+			"Content-Length": audioBuffer.length,
+		});
+		res.send(audioBuffer);
+	} catch (error) {
+		console.error("Speak Error:", error);
+		res.status(500).json({ error: "TTS Failed" });
+	}
+};
+
+module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController };

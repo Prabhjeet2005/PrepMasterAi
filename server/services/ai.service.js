@@ -1,6 +1,7 @@
 // services/aiService.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
+const { createClient } = require("@deepgram/sdk");
 const Interview = require("../models/interview.model.js")
 require("dotenv").config();
 
@@ -9,12 +10,41 @@ class AIService {
 		// 1. Initialize Providers
 		this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 		this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+		this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
 		this.sessions = {};
 	}
 
 	getProvider() {
 		return process.env.CURRENT_AI_PROVIDER || "GROQ";
+	}
+
+	async generateAudio(text) {
+		try {
+			const response = await this.deepgram.speak.request(
+				{ text },
+				{
+					model: "aura-asteria-en", // Human-like voice
+					encoding: "linear16",
+					container: "wav",
+				},
+			);
+
+			const stream = await response.getStream();
+			const buffer = await this.streamToBuffer(stream);
+			return buffer;
+		} catch (error) {
+			console.error("Deepgram TTS Error:", error);
+			throw error;
+		}
+	}
+
+	async streamToBuffer(stream) {
+		const chunks = [];
+		for await (const chunk of stream) {
+			chunks.push(Buffer.from(chunk));
+		}
+		return Buffer.concat(chunks);
 	}
 
 	async startChat(userId, systemInstruction) {
@@ -127,35 +157,50 @@ class AIService {
 		const interview = await Interview.findById(interviewId);
 		if (!interview) throw new Error("Interview not found");
 
-		// Convert chat history to a readable string for the AI
+		// 1. Check for "Too Short" Interview
+		const userMessages = interview.messages.filter(
+			(m) => m.role === "user",
+		);
+		if (userMessages.length < 3) {
+			const poorScore = {
+				overallScore: 1,
+				technicalAccuracy: 1,
+				communicationSkills: 1,
+				strengths: ["None"],
+				weaknesses: ["Interview was too short to evaluate."],
+				improvementTips: "Please complete a full interview session.",
+				generatedAt: new Date(),
+			};
+			interview.feedback = poorScore;
+			interview.status = "completed";
+			await interview.save();
+			return poorScore;
+		}
+
 		const conversationText = interview.messages
 			.map((m) => `${m.role.toUpperCase()}: ${m.content}`)
 			.join("\n");
 
 		const systemPrompt = `
-        You are a strict Senior Technical Recruiter. Analyze the following interview transcript.
-        
-        Transcript:
+        You are a strict Senior Technical Recruiter.
+        TRANSCRIPT:
         ${conversationText}
         
-        Task: Generate a structured feedback report in STRICT JSON format.
+        GRADING RULES:
+        1. Ignore the Resume content for grading. Grade ONLY the User's answers in the transcript.
+        2. If the user only said "Hello" or generic phrases, score 1/10.
+        3. Be harsh. 1-2 sentence answers = Max 3/10.
         
-        GRADING RUBRIC (FOLLOW STRICTLY):
-        1. Short Answers (1-2 sentences) = Max Score 3/10.
-        2. Vague/Generic Answers = Max Score 5/10.
-        3. Good Technical Depth = Score 7-8/10.
-        4. Exceptional/Architectural Depth = Score 9-10/10.
-        
-        Output Format (JSON ONLY):
+        OUTPUT JSON:
         {
-            "overallScore": (0-10),
-            "technicalAccuracy": (0-10),
-            "communicationSkills": (0-10),
-            "strengths": ["point 1", "point 2"],
-            "weaknesses": ["point 1", "point 2"],
-            "improvementTips": "Specific technical advice..."
+            "overallScore": 0,
+            "technicalAccuracy": 0,
+            "communicationSkills": 0,
+            "strengths": [],
+            "weaknesses": [],
+            "improvementTips": ""
         }
-    `;
+        `;
 
 		let feedbackJson = {};
 
