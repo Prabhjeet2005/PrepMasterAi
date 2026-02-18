@@ -192,6 +192,15 @@ class AIService {
 
 		return interview.feedback;
 	}
+
+	// Add this helper method to your AIService class:
+	async generateFeedbackForUser(userId) {
+		if (!this.sessions[userId]) {
+			throw new Error("No active session found");
+		}
+		const dbId = this.sessions[userId].dbId; // Get the saved Mongo ID
+		return await this.generateFeedback(dbId);
+	}
 }
 
 // Export as a Singleton (New instance created immediately)
