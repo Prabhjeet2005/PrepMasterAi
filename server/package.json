@@ -19,6 +19,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "groq-sdk": "^0.37.0",
+    "mongodb": "^7.1.0",
     "mongoose": "^9.2.1",
     "multer": "^2.0.2",
     "openai": "^6.16.0",

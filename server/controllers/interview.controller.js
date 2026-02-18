@@ -3,8 +3,6 @@ const aiService = require('../services/ai.service.js'); // Import the adapter
 const pdf = require("pdf-extraction"); // NEW LIBRARY
 const fs = require("fs");
 
-let chatHistory = {};
-
 const extractTextFromPDF = async (buffer) => {
 	try {
 		const data = await pdf(buffer);
@@ -87,4 +85,18 @@ const chatWithAIController = async (req, res) => {
 	}
 };
 
-module.exports = { chatWithAIController, startInterviewController };
+const generateFeedbackController = async (req, res) => {
+	try {
+		const { interviewId } = req.body; // We get ID from frontend
+		if (!interviewId)
+			return res.status(400).json({ error: "Interview ID required" });
+
+		const feedback = await aiService.generateFeedback(interviewId);
+		res.json(feedback);
+	} catch (error) {
+		console.error("Feedback Error:", error);
+		res.status(500).json({ error: "Failed to generate feedback" });
+	}
+};
+
+module.exports = { chatWithAIController, startInterviewController, generateFeedbackController };

@@ -3,6 +3,7 @@ dotenv.config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const interviewRouter = require("./routes/interview.routes");
 const setupSocket = require("./sockets/socketHandler");
@@ -14,6 +15,10 @@ const server = http.createServer(app);
 // Middleware
 app.use(cors());
 app.use(express.json()); // Allows us to receive JSON data
+
+const MONGO_URI = process.env.MONGO_URI;
+
+mongoose.connect(MONGO_URI).then(()=>console.log("DB CONNECTED")).catch((err => console.error("Error Connecting DB")))
 
 // Routes
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
