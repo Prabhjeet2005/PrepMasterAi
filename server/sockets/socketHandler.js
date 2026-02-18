@@ -13,8 +13,9 @@ const setupSocket = (io) => {
 
 		let deepgramLive = null;
 		let packetQueue = []; // 1. Queue to store audio while connecting
+		let currentTranscript = "";
 
-    socket.on("audio-stream", (data) => {
+		socket.on("audio-stream", (data) => {
 			// 3. SMART SENDING LOGIC
 			if (deepgramLive && deepgramLive.getReadyState() === 1) {
 				// If Open, send directly
@@ -31,13 +32,13 @@ const setupSocket = (io) => {
 
 			// Reset queue on new interview
 			packetQueue = [];
+			currentTranscript = "";
 
 			deepgramLive = deepgram.listen.live({
 				model: "nova-2",
 				language: "en-US",
 				smart_format: true,
 				interim_results: true,
-        utterance_end_ms: 1000 // 1 sec silence
 			});
 
 			deepgramLive.on(LiveTranscriptionEvents.Open, () => {
@@ -55,41 +56,82 @@ const setupSocket = (io) => {
 				}
 			});
 
-			deepgramLive.on(LiveTranscriptionEvents.Transcript, async (data) => {
+			deepgramLive.on(LiveTranscriptionEvents.Transcript, (data) => {
 				const transcript = data.channel.alternatives[0].transcript;
+
+				// 1. Send Real-time Text to Frontend (So you see what you say)
+				if (transcript) {
+					socket.emit("transcript-update", {
+						text: transcript,
+						isFinal: data.is_final,
+					});
+				}
+
+				// 2. Accumulate Final Text (Don't ask AI yet!)
 				if (transcript && data.is_final) {
-            console.log("🗣️ User Finished Speaking:", transcript);
-                try {
-                    // 3. ASK GEMINI
-                    console.log("🤖 Asking AI...");
-										const aiResponse = await aiService.sendMessage(
-											"user1",
-											transcript,
-										);
-                    console.log("🤖 Ai Reply:", aiResponse);
-
-                    // 4. SEND BACK TO FRONTEND
-                    socket.emit("ai-response", aiResponse);
-                } catch (err) {
-                    console.error("Ai Service Error:", err?.message);
-										if (err.message.includes("No active session")) {
-											socket.emit(
-												"ai-response",
-												"Please upload your resume to start the interview first.",
-											);
-										}
-                }
-             
-        }
+					currentTranscript += transcript + " ";
+					console.log("📝 Buffered:", currentTranscript);
+				}
 			});
+			// -----------------------------
 
-			deepgramLive.on(LiveTranscriptionEvents.Error, (error) => {
-				console.error("🔴 Deepgram Error:", error);
-			});
+			deepgramLive.on(LiveTranscriptionEvents.Error, (err) =>
+				console.error("🔴 Deepgram Error:", err),
+			);
+			deepgramLive.on(LiveTranscriptionEvents.Close, () =>
+				console.log("🔴 Deepgram Connection Closed"),
+			);
+		});
 
-			deepgramLive.on(LiveTranscriptionEvents.Close, (event) => {
-				console.log("🔴 Deepgram Connection Closed");
-			});
+		// 3. NEW: Manual Trigger to Ask AI (The "Finish Speaking" Button)
+		socket.on("commit-answer", async () => {
+			console.log(
+				"🛑 User clicked 'Done'. Sending to AI:",
+				currentTranscript,
+			);
+
+			if (!currentTranscript.trim()) {
+				return; // Don't send empty silence
+			}
+
+			try {
+				console.log("🤖 Asking AI...");
+				const aiResponse = await aiService.sendMessage(
+					"user1",
+					currentTranscript,
+				);
+
+				// Send AI response back
+				socket.emit("ai-response", aiResponse);
+				socket.emit("user-input-confirmed", currentTranscript);
+
+				// Clear buffer for next question
+				currentTranscript = "";
+			} catch (err) {
+				console.error("AI Error:", err.message);
+			}
+		});
+
+		// 4. NEW: End Session & Get Feedback
+		socket.on("end-interview", async () => {
+			console.log("🏁 Ending Interview for User1...");
+			try {
+				// "user1" is hardcoded for now, but in production, pass userId from frontend
+				// Assumption: Your aiService.generateFeedback needs an Interview ID.
+				// Since we store session in memory, let's look up the ID from aiService session.
+
+				// NOTE: You might need to add a method 'getSession("user1")' to aiService
+				// to get the database ID of the current interview.
+				// For now, let's assume aiService handles the lookup internally or we pass the ID.
+
+				// Option A: If aiService remembers the active DB ID:
+				const feedback = await aiService.generateFeedbackForUser("user1");
+
+				socket.emit("feedback-result", feedback);
+			} catch (err) {
+				console.error("Feedback Error:", err.message);
+				socket.emit("error", "Failed to generate feedback.");
+			}
 		});
 
 		socket.on("disconnect", () => {
@@ -97,7 +139,6 @@ const setupSocket = (io) => {
 			if (deepgramLive) {
 				deepgramLive.finish();
 				deepgramLive = null;
-				packetQueue = [];
 			}
 		});
 	});

@@ -53,11 +53,13 @@ const startInterviewController = async (req, res) => {
             Your Goal: Drill the candidate on THEIR specific projects and skills mentioned above.
             
             Rules:
-            1. Start by asking a question about a specific project or skill from the resume.
-            2. Do not be generic. If they mention "MongoDB", ask about indexing or schema design.
-            3. If they mention a project, ask about the hardest technical challenge they faced in it.
-            4. Keep questions short (1-2 sentences).
-            5. Adopt a professional, slightly intimidating tone.
+						1: Start with a brief professional introduction.
+        		2: Ask specific technical questions based on the resume. 
+        		3: Ask one question at a time. Short questions.
+            4. Start by asking a question about a specific project or skill from the resume.
+            5. Do not be generic. If they mention "MongoDB", ask about indexing or schema design.
+            6. If they mention a project, ask about the hardest technical challenge they faced in it.
+            7. Adopt a professional tone.
             
             Start the interview now with the first question.
         `;
@@ -99,4 +101,23 @@ const generateFeedbackController = async (req, res) => {
 	}
 };
 
-module.exports = { chatWithAIController, startInterviewController, generateFeedbackController };
+const speakController = async (req, res) => {
+	try {
+		const { text } = req.body;
+		if (!text) return res.status(400).json({ error: "Text required" });
+
+		const audioBuffer = await aiService.generateAudio(text);
+
+		// Send Audio File back to frontend
+		res.set({
+			"Content-Type": "audio/wav",
+			"Content-Length": audioBuffer.length,
+		});
+		res.send(audioBuffer);
+	} catch (error) {
+		console.error("Speak Error:", error);
+		res.status(500).json({ error: "TTS Failed" });
+	}
+};
+
+module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController };
