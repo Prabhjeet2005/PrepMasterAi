@@ -13,7 +13,13 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(cors());
+app.use(
+	cors({
+		origin: "*", // <--- Allow requests from any URL (including Vercel)
+		methods: ["GET", "POST", "PUT", "DELETE"],
+		credentials: true,
+	}),
+);
 app.use(express.json()); // Allows us to receive JSON data
 
 const MONGO_URI = process.env.MONGO_URI;
@@ -25,12 +31,12 @@ app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
 app.use("/api/interview", interviewRouter);
 
 // SOCKET
-const io = new Server(server,{
-	cors:{
-		origin:"*",
-		methods:["GET","POST"]
-	}
-})
+const io = new Server(server, {
+	cors: {
+		origin: "*", // <--- Allow WebSockets from any URL
+		methods: ["GET", "POST"],
+	},
+});
 
 setupSocket(io);
 
