@@ -1,5 +1,7 @@
 // services/aiService.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const googleTTS = require("google-tts-api"); 
+const axios = require("axios");
 const Groq = require("groq-sdk");
 const { createClient } = require("@deepgram/sdk");
 const Interview = require("../models/interview.model.js")
@@ -19,22 +21,61 @@ class AIService {
 		return process.env.CURRENT_AI_PROVIDER || "GROQ";
 	}
 
+	getTTSProvider() {
+		return process.env.TTS_PROVIDER || "GOOGLE"; // Default to Free
+	}
+
+	// --- SWITCHABLE TTS GENERATOR ---
 	async generateAudio(text) {
+		const provider = this.getTTSProvider();
+		console.log(`🔊 Generating Audio using: ${provider}`);
+
+		if (provider === "DEEPGRAM") {
+			return await this.generateDeepgramAudio(text);
+		} else if (provider === "GOOGLE") {
+			return await this.generateGoogleAudio(text);
+		} else {
+			// Fallback to Google if typo
+			return await this.generateGoogleAudio(text);
+		}
+	}
+
+	// 1. DEEPGRAM (High Quality - Cost Credits)
+	async generateDeepgramAudio(text) {
 		try {
 			const response = await this.deepgram.speak.request(
 				{ text },
 				{
-					model: "aura-asteria-en", // Human-like voice
-					encoding: "linear16",
+					model: "aura-asteria-en",
+					encoding: "linear16", // Changed to MP3 for consistency
 					container: "wav",
 				},
 			);
-
 			const stream = await response.getStream();
-			const buffer = await this.streamToBuffer(stream);
-			return buffer;
+			return await this.streamToBuffer(stream);
 		} catch (error) {
 			console.error("Deepgram TTS Error:", error);
+			throw error;
+		}
+	}
+
+	async generateGoogleAudio(text) {
+		try {
+			// Use getAllAudioBase64 to safely handle text longer than 200 characters
+			const results = await googleTTS.getAllAudioBase64(text, {
+				lang: "en",
+				slow: false,
+				host: "https://translate.google.com",
+				splitPunct: ",.?", // Splits chunks smartly at punctuation
+			});
+
+			// Combine all audio chunks into a single Buffer
+			const buffers = results.map((res) =>
+				Buffer.from(res.base64, "base64"),
+			);
+			return Buffer.concat(buffers);
+		} catch (error) {
+			console.error("Google TTS Error:", error);
 			throw error;
 		}
 	}

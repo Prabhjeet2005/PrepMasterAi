@@ -109,10 +109,17 @@ const speakController = async (req, res) => {
 		const audioBuffer = await aiService.generateAudio(text);
 
 		// Send Audio File back to frontend
+		if(process.env.TTS_PROVIDER="GOOGLE"){
+		res.set({
+			"Content-Type": "audio/mp3",
+			"Content-Length": audioBuffer.length,
+		});}
+		else if(process.env.TTS_PROVIDER="DEEPGRAM"){
 		res.set({
 			"Content-Type": "audio/wav",
 			"Content-Length": audioBuffer.length,
-		});
+		});}
+		
 		res.send(audioBuffer);
 	} catch (error) {
 		console.error("Speak Error:", error);

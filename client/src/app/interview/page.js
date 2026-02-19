@@ -71,11 +71,6 @@ export default function InterviewPage() {
 			setUserSubtitle(data.text);
 		});
 
-		newSocket.on("user-input-confirmed", (text) => {
-			addMessage("user", text);
-			setUserSubtitle("");
-		});
-
 		newSocket.on("feedback-result", (data) => {
 			localStorage.setItem("latestFeedback", JSON.stringify(data));
 			router.push("/feedback");
@@ -104,6 +99,9 @@ export default function InterviewPage() {
 			// 2. Play It
 			const audioUrl = URL.createObjectURL(response.data);
 			const audio = new Audio(audioUrl);
+
+			audio.playbackRate = 1.3; // 1.0 is normal, 1.2 is 20% faster, 1.5 is 50% faster
+
 			audioRef.current = audio;
 
 			audio.onended = () => {
@@ -160,6 +158,11 @@ export default function InterviewPage() {
 		setIsThinking(true); // Trigger Thinking State
 		setStatus("Thinking");
 
+		if (userSubtitle) {
+			addMessage("user", userSubtitle);
+			setUserSubtitle(""); // Clear the live subtitle
+		}
+
 		// Send signal to backend
 		if (socket) socket.emit("commit-answer");
 	};
@@ -211,7 +214,7 @@ export default function InterviewPage() {
 					)}
 					{aiSpeaking && (
 						<>
-							<Volume2 className="animate-pulse" size={18} /> SPEAKING
+							<Bot className="animate-pulse" size={18} /> AI IS SPEAKING
 						</>
 					)}
 					{!isRecording && !isThinking && !aiSpeaking && (
@@ -223,7 +226,7 @@ export default function InterviewPage() {
 			{/* MAIN CONTENT AREA */}
 			<div className="flex-1 flex flex-col items-center justify-center relative p-4 gap-8">
 				{/* A. QUESTION BUBBLE (PERSISTENT) */}
-				<div className="w-full max-w-3xl text-center min-h-[120px] flex items-center justify-center z-10">
+				<div className="w-full max-w-3xl text-center min-h-30 flex items-center justify-center z-10">
 					<AnimatePresence mode="wait">
 						<motion.div
 							key={questionBubble}
