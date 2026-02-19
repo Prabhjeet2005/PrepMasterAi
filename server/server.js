@@ -24,8 +24,11 @@ app.use(express.json()); // Allows us to receive JSON data
 
 const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(MONGO_URI).then(()=>console.log("DB CONNECTED")).catch((err => console.error("Error Connecting DB")))
-
+mongoose
+	.connect(process.env.MONGO_URI)
+	.then(() => console.log("✅ DB CONNECTED SUCCESSFULLY"))
+	.catch((err) => console.error("❌ DB CONNECTION ERROR:", err.message));
+	
 // Routes
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
 app.use("/api/interview", interviewRouter);
