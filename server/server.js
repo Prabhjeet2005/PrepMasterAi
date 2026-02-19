@@ -9,7 +9,7 @@ const interviewRouter = require("./routes/interview.routes");
 const setupSocket = require("./sockets/socketHandler");
 
 
-const app = express();
+const app = express(); 
 const server = http.createServer(app);
 
 // Middleware
