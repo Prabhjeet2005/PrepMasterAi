@@ -9,6 +9,7 @@ import {
 	TrendingUp,
 	AlertCircle,
 	ArrowRight,
+	Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -21,7 +22,7 @@ import {
 	ResponsiveContainer,
 } from "recharts";
 
-export default function DashboardPage() {
+export default function UserDashboardPage() {
 	const { authUser, isLoading: authLoading } = useAuthContext();
 	const router = useRouter();
 
@@ -30,19 +31,17 @@ export default function DashboardPage() {
 	const [error, setError] = useState("");
 
 	useEffect(() => {
-		// If auth finishes loading and there is no user, kick them to login
 		if (!authLoading && !authUser) {
 			router.push("/login");
 			return;
 		}
 
-		// Fetch the interviews
 		const fetchDashboardData = async () => {
 			try {
 				const res = await axios.get(
 					`${process.env.NEXT_PUBLIC_API_URL}/api/interview/user-dashboard`,
 					{
-						withCredentials: true, // <--- Crucial to pass the bouncer
+						withCredentials: true,
 					},
 				);
 				setInterviews(res.data);
@@ -54,29 +53,47 @@ export default function DashboardPage() {
 			}
 		};
 
-		if (authUser) {
-			fetchDashboardData();
-		}
+		if (authUser) fetchDashboardData();
 	}, [authUser, authLoading, router]);
 
-	// Helper function to format MongoDB dates
+	const handleDelete = async (id) => {
+		// Confirm before deleting
+		if (
+			!window.confirm(
+				"Are you sure you want to delete this interview record? This cannot be undone.",
+			)
+		)
+			return;
+
+		try {
+			await axios.delete(
+				`${process.env.NEXT_PUBLIC_API_URL}/api/interview/history/${id}`,
+				{
+					withCredentials: true,
+				},
+			);
+			// Remove the deleted interview from the UI immediately
+			setInterviews((prev) => prev.filter((inv) => inv._id !== id));
+		} catch (err) {
+			console.error("Failed to delete:", err);
+			alert("Failed to delete interview. Please try again.");
+		}
+	};
+
 	const formatDate = (dateString) => {
 		const options = { year: "numeric", month: "short", day: "numeric" };
 		return new Date(dateString).toLocaleDateString(undefined, options);
 	};
 
-	// Prepare data for the chart (Chronological order: Oldest to Newest)
 	const chartData = [...interviews].reverse().map((inv, index) => ({
-		name: `Interview ${index + 1}`,
+		name: `Int ${index + 1}`,
 		date: formatDate(inv.createdAt),
-		// Convert the 100-point score to a 10-point scale for the chart as requested
 		score: inv.feedback?.overallScore
 			? (inv.feedback.overallScore).toFixed(1)
 			: 0,
 	}));
 
-	// Custom Tooltip for the Chart Hover
-	const CustomTooltip = ({ active, payload, label }) => {
+	const CustomTooltip = ({ active, payload }) => {
 		if (active && payload && payload.length) {
 			return (
 				<div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl">
@@ -93,16 +110,27 @@ export default function DashboardPage() {
 		return null;
 	};
 
+	// --- SKELETON LOADER ---
 	if (authLoading || loading) {
 		return (
-			<div className="min-h-screen bg-slate-950 flex items-center justify-center">
-				<Loader2 className="animate-spin text-blue-500" size={48} />
+			<div className="min-h-screen bg-slate-950 text-white p-4 md:p-8">
+				<div className="max-w-6xl mx-auto mt-8 space-y-8">
+					<div className="h-12 w-64 bg-slate-900 animate-pulse rounded-lg"></div>
+					<div className="h-64 w-full bg-slate-900 animate-pulse rounded-2xl"></div>
+					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+						{[1, 2, 3].map((i) => (
+							<div
+								key={i}
+								className="h-56 bg-slate-900 animate-pulse rounded-2xl"></div>
+						))}
+					</div>
+				</div>
 			</div>
 		);
 	}
 
 	return (
-		<div className="min-h-screen bg-slate-950 text-white p-8">
+		<div className="min-h-screen bg-slate-950 text-white p-4 md:p-8">
 			<div className="max-w-6xl mx-auto mt-8">
 				<div className="flex justify-between items-end mb-10">
 					<div>
@@ -114,7 +142,7 @@ export default function DashboardPage() {
 						</p>
 					</div>
 					<Link
-						href="/dashboard"
+						href="/"
 						className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-xl transition-colors">
 						New Interview
 					</Link>
@@ -145,8 +173,7 @@ export default function DashboardPage() {
 					</div>
 				) : (
 					<>
-						{/* THE NEW PROGRESS CHART */}
-						{interviews.length > 1 && (
+						{interviews.length >= 1 && (
 							<div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-8 shadow-lg">
 								<h3 className="text-lg font-bold mb-6 flex items-center gap-2">
 									<TrendingUp className="text-blue-400" size={20} />{" "}
@@ -203,26 +230,34 @@ export default function DashboardPage() {
 								</div>
 							</div>
 						)}
+
 						<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 							{interviews.map((interview) => (
 								<div
 									key={interview._id}
-									className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all group flex flex-col">
-									<div className="flex justify-between items-start mb-6">
-										<div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-											<Calendar size={16} />
-											{formatDate(interview.createdAt)}
-										</div>
-										<div
-											className={`px-3 py-1 rounded-full text-sm font-bold border ${
-												interview.feedback?.overallScore >= 8
-													? "bg-green-900/30 text-green-400 border-green-500/30"
-													: interview.feedback?.overallScore >= 6
-														? "bg-yellow-900/30 text-yellow-400 border-yellow-500/30"
-														: "bg-red-900/30 text-red-400 border-red-500/30"
-											}`}>
-											{interview.feedback?.overallScore || 0} / 10
-										</div>
+									className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all group flex flex-col relative">
+									{/* NEW: DELETE BUTTON */}
+									<button
+										onClick={() => handleDelete(interview._id)}
+										className="absolute top-4 right-4 text-slate-500 hover:text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors z-10"
+										title="Delete Interview">
+										<Trash2 size={18} />
+									</button>
+
+									<div className="flex items-center gap-2 text-slate-400 text-sm font-medium mb-6">
+										<Calendar size={16} />
+										{formatDate(interview.createdAt)}
+									</div>
+
+									<div
+										className={`px-4 py-2 rounded-xl text-center font-black text-xl border mb-6 ${
+											interview.feedback?.overallScore >= 8
+												? "bg-green-900/30 text-green-400 border-green-500/30"
+												: interview.feedback?.overallScore >= 5
+													? "bg-yellow-900/30 text-yellow-400 border-yellow-500/30"
+													: "bg-red-900/30 text-red-400 border-red-500/30"
+										}`}>
+										{interview.feedback?.overallScore || 0} / 10
 									</div>
 
 									<div className="space-y-3 mb-8 flex-1">
@@ -240,7 +275,6 @@ export default function DashboardPage() {
 										</div>
 									</div>
 
-									{/* Note: We can link this to a detailed view later if you want! */}
 									<Link
 										href={`/user-dashboard/${interview._id}`}
 										className="w-full py-3 bg-slate-800 group-hover:bg-slate-700 rounded-xl text-sm font-bold text-slate-300 transition-colors flex justify-center items-center gap-2">

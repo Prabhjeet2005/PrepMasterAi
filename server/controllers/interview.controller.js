@@ -169,4 +169,27 @@ const getInterviewById = async (req, res) => {
 	}
 };
 
-module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController, getDashboardData,getInterviewById };
+const deleteInterviewById = async (req, res) => {
+	try {
+		const { id } = req.params;
+
+		// Find and delete, ensuring the user actually owns it
+		const deletedInterview = await Interview.findOneAndDelete({
+			_id: id,
+			userId: req.user._id,
+		});
+
+		if (!deletedInterview) {
+			return res
+				.status(404)
+				.json({ error: "Interview not found or unauthorized" });
+		}
+
+		res.status(200).json({ message: "Interview deleted successfully" });
+	} catch (error) {
+		console.error("Delete Interview Error:", error);
+		res.status(500).json({ error: "Failed to delete interview" });
+	}
+};
+
+module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController, getDashboardData,getInterviewById, deleteInterviewById };

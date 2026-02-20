@@ -6,6 +6,7 @@ const {
 	speakController,
 	getDashboardData,
 	getInterviewById,
+	deleteInterviewById,
 } = require("../controllers/interview.controller");
 const upload = require("../middlewares/upload.middleware");
 const protectRoute = require("../middlewares/protectRoute");
@@ -24,5 +25,7 @@ interviewRouter.post("/speak",protectRoute, speakController);
 interviewRouter.get("/user-dashboard", protectRoute, getDashboardData);
 
 interviewRouter.get("/history/:id", protectRoute, getInterviewById);
+
+interviewRouter.delete("/history/:id", protectRoute, deleteInterviewById);
 
 module.exports = interviewRouter;

@@ -10,6 +10,7 @@ import {
 	XCircle,
 	Lightbulb,
 	MessageSquare,
+  Printer
 } from "lucide-react";
 
 export default function DetailedInterviewView() {
@@ -72,14 +73,21 @@ export default function DetailedInterviewView() {
 	const transcript = messages?.filter((m) => m.role !== "system") || [];
 
 	return (
-		<div className="min-h-screen bg-slate-950 text-white p-4 md:p-8">
+		<div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 print:bg-slate-950 print:text-white print:color-adjust-exact">
 			<div className="max-w-5xl mx-auto mt-4">
-				<Link
-					href="/user-dashboard"
-					className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-8 font-medium">
-					<ArrowLeft size={16} /> Back to Dashboard
-				</Link>
+				<div className="flex justify-between items-center mb-2">
+					<Link
+						href="/user-dashboard"
+						className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors font-medium">
+						<ArrowLeft size={16} /> Back to Dashboard
+					</Link>
 
+					<button
+						onClick={() => window.print()}
+						className="flex hover:cursor-pointer items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+						<Printer size={16} /> Export PDF
+					</button>
+				</div>
 				<div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-4">
 					<div>
 						<h1 className="text-3xl font-bold mb-2">Interview Analysis</h1>
