@@ -131,7 +131,7 @@ export default function InterviewPage() {
 			utterance.voice = googleVoice;
 		}
 
-		utterance.rate = 1.15;
+		utterance.rate = 1.2;
 		window.currentUtterance = utterance;
 
 		utterance.onstart = () => window.speechSynthesis.resume();
@@ -144,7 +144,7 @@ export default function InterviewPage() {
 		utterance.onerror = (e) => {
 			console.error("Browser TTS Error:", e);
 			setAiSpeaking(false);
-			setStatus("Audio Error");
+			setStatus("Audio Interrupted");
 		};
 
 		window.speechSynthesis.speak(utterance);
