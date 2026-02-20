@@ -4,18 +4,28 @@ const {
 	chatWithAIController,
 	generateFeedbackController,
 	speakController,
+	getDashboardData,
+	getInterviewById,
+	deleteInterviewById,
 } = require("../controllers/interview.controller");
 const upload = require("../middlewares/upload.middleware");
+const protectRoute = require("../middlewares/protectRoute");
 const interviewRouter = express.Router();
 
 // Route to initialize the interview context
-interviewRouter.post("/start", upload.single("resume"),startInterviewController);
+interviewRouter.post("/start", protectRoute, upload.single("resume"),startInterviewController);
 
 // Route to send a user answer and get a response
-interviewRouter.post("/chat", chatWithAIController);
+interviewRouter.post("/chat",protectRoute, chatWithAIController);
 
-interviewRouter.post("/feedback",generateFeedbackController)
+interviewRouter.post("/feedback",protectRoute,generateFeedbackController)
 
-interviewRouter.post("/speak", speakController);
+interviewRouter.post("/speak",protectRoute, speakController);
+
+interviewRouter.get("/user-dashboard", protectRoute, getDashboardData);
+
+interviewRouter.get("/history/:id", protectRoute, getInterviewById);
+
+interviewRouter.delete("/history/:id", protectRoute, deleteInterviewById);
 
 module.exports = interviewRouter;

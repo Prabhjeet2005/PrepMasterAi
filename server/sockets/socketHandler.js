@@ -84,7 +84,7 @@ const setupSocket = (io) => {
 		});
 
 		// 3. NEW: Manual Trigger to Ask AI (The "Finish Speaking" Button)
-		socket.on("commit-answer", async () => {
+		socket.on("commit-answer", async (userId) => {
 			console.log(
 				"🛑 User clicked 'Done'. Sending to AI:",
 				currentTranscript,
@@ -97,7 +97,7 @@ const setupSocket = (io) => {
 			try {
 				console.log("🤖 Asking AI...");
 				const aiResponse = await aiService.sendMessage(
-					"user1",
+					userId,
 					currentTranscript,
 				);
 
@@ -113,20 +113,10 @@ const setupSocket = (io) => {
 		});
 
 		// 4. NEW: End Session & Get Feedback
-		socket.on("end-interview", async () => {
-			console.log("🏁 Ending Interview for User1...");
+		socket.on("end-interview", async (userId) => {
+			console.log(`🏁 Ending Interview for User ${userId}...`);
 			try {
-				// "user1" is hardcoded for now, but in production, pass userId from frontend
-				// Assumption: Your aiService.generateFeedback needs an Interview ID.
-				// Since we store session in memory, let's look up the ID from aiService session.
-
-				// NOTE: You might need to add a method 'getSession("user1")' to aiService
-				// to get the database ID of the current interview.
-				// For now, let's assume aiService handles the lookup internally or we pass the ID.
-
-				// Option A: If aiService remembers the active DB ID:
-				const feedback = await aiService.generateFeedbackForUser("user1");
-
+				const feedback = await aiService.generateFeedbackForUser(userId);
 				socket.emit("feedback-result", feedback);
 			} catch (err) {
 				console.error("Feedback Error:", err.message);

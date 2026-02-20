@@ -2,6 +2,8 @@ const dotenv = require("dotenv");
 dotenv.config();
 const express = require("express");
 const http = require("http");
+const cookieParser =require("cookie-parser");
+const authRoutes = require("./routes/auth.routes.js");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -15,14 +17,16 @@ const server = http.createServer(app);
 // Middleware
 app.use(
 	cors({
-		origin: "*", // <--- Allow requests from any URL (including Vercel)
+		origin: [
+			"http://localhost:3000",
+			"https://prep-master-ai-client.vercel.app",
+		], // <--- Allow requests from any URL (including Vercel)
 		methods: ["GET", "POST", "PUT", "DELETE"],
 		credentials: true,
 	}),
 );
 app.use(express.json()); // Allows us to receive JSON data
-
-const MONGO_URI = process.env.MONGO_URI;
+app.use(cookieParser());
 
 mongoose
 	.connect(process.env.MONGO_URI)
@@ -31,12 +35,16 @@ mongoose
 	
 // Routes
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
+app.use("/api/auth", authRoutes);
 app.use("/api/interview", interviewRouter);
 
 // SOCKET
 const io = new Server(server, {
 	cors: {
-		origin: "*", // <--- Allow WebSockets from any URL
+		origin: [
+			"http://localhost:3000",
+			"https://prep-master-ai-client.vercel.app",
+		], // <--- Allow WebSockets from any URL
 		methods: ["GET", "POST"],
 	},
 });
