@@ -37,7 +37,7 @@ export default function InterviewPage() {
 	const [userSubtitle, setUserSubtitle] = useState("");
 	const [voices, setVoices] = useState([]);
 
-	const {authUser} = useAuthContext();
+	const { authUser } = useAuthContext();
 
 	const mediaRecorderRef = useRef(null);
 	const messagesEndRef = useRef(null);
@@ -245,24 +245,17 @@ export default function InterviewPage() {
 				</div>
 			</div>
 
-			{/* MOBILE CHAT TOGGLE BUTTON */}
-			<div className="absolute top-4 right-4 z-50 lg:hidden">
-				<button
-					onClick={() => setIsChatOpen(!isChatOpen)}
-					className="p-2 md:p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full text-slate-300 shadow-2xl transition-all">
-					{isChatOpen ? <X size={20} /> : <MessageSquare size={20} />}
-				</button>
-			</div>
-
 			{/* MAIN CONTENT AREA */}
 			<div className="flex-1 flex flex-col items-center justify-center relative p-4 gap-6 md:gap-8 mt-12 md:mt-0">
-				<div className="w-full max-w-3xl text-center min-h-[100px] md:min-h-[120px] flex items-center justify-center z-10">
+				{/* FIXED HEIGHT, SCROLLABLE AI QUESTION BUBBLE */}
+				<div className="w-full max-w-3xl flex items-center justify-center z-10">
 					<AnimatePresence mode="wait">
 						<motion.div
 							key={questionBubble}
 							initial={{ opacity: 0, y: 10 }}
 							animate={{ opacity: 1, y: 0 }}
-							className={`px-6 py-4 md:px-8 md:py-6 rounded-2xl md:rounded-3xl text-base sm:text-lg md:text-2xl font-medium shadow-2xl backdrop-blur-md border ${
+							// Added max-h-[150px]/[180px], overflow-y-auto, and custom scrollbar styles
+							className={`w-full max-h-[150px] md:max-h-[180px] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full px-6 py-4 md:px-8 md:py-6 rounded-2xl md:rounded-3xl text-base sm:text-lg md:text-xl font-medium shadow-2xl backdrop-blur-md border ${
 								aiSpeaking
 									? "bg-blue-600/20 border-blue-500/30 text-white"
 									: "bg-slate-800/50 border-slate-700 text-slate-200"
@@ -285,7 +278,6 @@ export default function InterviewPage() {
 										? "bg-purple-500"
 										: "bg-slate-800"
 						}`}></div>
-					{/* Responsive Avatar: w-32 on mobile, w-48 on desktop */}
 					<motion.div
 						animate={{ scale: aiSpeaking ? [1, 1.05, 1] : 1 }}
 						transition={{ repeat: Infinity, duration: 0.5 }}
@@ -314,20 +306,42 @@ export default function InterviewPage() {
 				</div>
 			</div>
 
-			{/* RESPONSIVE SLIDE-OVER SIDEBAR */}
-			{/* Mobile: Anchored above controls. Desktop: Floating right sidebar */}
+			{/* FLOATING CHAT WIDGET TOGGLE */}
+			<div className="absolute bottom-28 md:bottom-32 right-4 md:right-8 z-50">
+				<button
+					onClick={() => setIsChatOpen(!isChatOpen)}
+					className={`p-3 md:p-4 rounded-full shadow-2xl transition-all flex items-center justify-center ${
+						isChatOpen
+							? "bg-slate-700 text-white"
+							: "bg-blue-600 hover:bg-blue-500 text-white"
+					}`}>
+					{isChatOpen ? <X size={24} /> : <MessageSquare size={24} />}
+				</button>
+			</div>
+
+			{/* FLOATING TRANSCRIPT PANEL (CHATBOT STYLE) */}
 			<div
-				className={`fixed top-16 bottom-20 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 lg:absolute lg:top-24 lg:bottom-32 lg:w-80 bg-slate-900/95 lg:bg-slate-900/80 backdrop-blur lg:border border border-slate-700 lg:border-slate-800 rounded-2xl flex flex-col shadow-2xl z-40 transition-transform duration-300 ${isChatOpen ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none lg:pointer-events-auto lg:translate-x-0 lg:opacity-100"}`}>
-				<div className="p-4 border-b border-slate-800 bg-slate-950/50 text-xs font-bold uppercase tracking-wider text-slate-500 flex justify-between items-center">
+				className={`fixed bottom-44 md:bottom-52 right-4 left-4 sm:left-auto sm:right-8 sm:w-[400px] lg:w-[30vw] h-[60vh] max-h-[500px] bg-slate-900/95 backdrop-blur border border-slate-700 rounded-2xl flex flex-col shadow-2xl z-40 transition-all duration-300 origin-bottom-right ${
+					isChatOpen
+						? "scale-100 opacity-100 pointer-events-auto"
+						: "scale-90 opacity-0 pointer-events-none"
+				}`}>
+				<div className="p-4 border-b border-slate-800 bg-slate-950/50 text-xs font-bold uppercase tracking-wider text-slate-500 flex justify-between items-center rounded-t-2xl">
 					<span>Transcript</span>
 				</div>
-				<div className="flex-1 overflow-y-auto p-4 space-y-4">
+				<div className="flex-1 overflow-y-auto p-4 space-y-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
 					{transcript.map((msg, i) => (
 						<div
 							key={i}
 							className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
 							<div
-								className={`max-w-[85%] p-3 rounded-xl text-xs md:text-sm ${msg.sender === "user" ? "bg-slate-700 text-white" : "bg-blue-900/30 border border-blue-500/30 text-blue-100"}`}>
+								className={`max-w-[85%] p-3 rounded-xl text-xs md:text-sm ${
+									msg.sender === "user"
+										? msg.isPending
+											? "bg-slate-700/50 text-slate-400 animate-pulse border border-slate-600/50"
+											: "bg-slate-700 text-white"
+										: "bg-blue-900/30 border border-blue-500/30 text-blue-100"
+								}`}>
 								{msg.text}
 							</div>
 						</div>
@@ -337,7 +351,6 @@ export default function InterviewPage() {
 			</div>
 
 			{/* ZOOM STYLE CONTROLS */}
-			{/* Reduced height and gaps for mobile */}
 			<div className="h-20 md:h-24 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 flex items-center justify-center gap-6 sm:gap-12 z-30 relative px-4">
 				{!isRecording ? (
 					<button

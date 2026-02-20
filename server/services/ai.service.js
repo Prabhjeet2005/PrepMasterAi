@@ -229,8 +229,8 @@ class AIService {
         
         GRADING RULES:
         1. Ignore the Resume content for grading. Grade ONLY the User's answers in the transcript.
-        2. If the user only said "Hello" or generic phrases, score 1/10.
-        3. Be harsh. 1-2 sentence answers = Max 3/10.
+        2. If the user only said "Hello" or generic phrases, score 2/10.
+        3. Be harsh. 1-2 sentence answers = Max 5/10.
         
         OUTPUT JSON:
         {

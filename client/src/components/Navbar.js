@@ -2,7 +2,7 @@
 import Link from "next/link";
 import axios from "axios";
 import { useAuthContext } from "@/context/AuthContext";
-import { LogOut, User as UserIcon } from "lucide-react";
+import { Gauge, LogOut, User as UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function Navbar() {
@@ -42,8 +42,8 @@ export default function Navbar() {
 					<div className="flex items-center gap-4">
 						<Link
 							href="/user-dashboard"
-							className="text-sm font-bold text-slate-300 hover:text-white transition-colors mr-2">
-							Dashboard
+							className="text-sm font-bold flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors mr-2">
+							Your Dashboard <Gauge size={18} />
 						</Link>
 						<div className="flex items-center gap-2 text-slate-300 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
 							<UserIcon size={16} className="text-blue-400" />
