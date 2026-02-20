@@ -2,6 +2,8 @@ const dotenv = require("dotenv");
 dotenv.config();
 const express = require("express");
 const http = require("http");
+const cookieParser =require("cookie-parser");
+const authRoutes = require("./routes/auth.routes.js");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -21,8 +23,7 @@ app.use(
 	}),
 );
 app.use(express.json()); // Allows us to receive JSON data
-
-const MONGO_URI = process.env.MONGO_URI;
+app.use(cookieParser());
 
 mongoose
 	.connect(process.env.MONGO_URI)
@@ -31,6 +32,7 @@ mongoose
 	
 // Routes
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
+app.use("/api/auth", authRoutes);
 app.use("/api/interview", interviewRouter);
 
 // SOCKET
