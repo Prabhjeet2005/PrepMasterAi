@@ -64,10 +64,12 @@ const startInterviewController = async (req, res) => {
             Start the interview now with the first question.
         `;
 
-		// 4. Initialize Chat
-		const response = await aiService.startChat("user1", systemInstruction);
-		res.json({ message: response });
-		
+		// 4. Initialize Chat with the REAL User ID
+		const userId = req.user._id.toString(); // <--- Get ID from the bouncer
+		const response = await aiService.startChat(userId, systemInstruction);
+
+		// Send back the message AND the userId so the frontend knows what ID to use for sockets
+		res.json({ message: response, userId: userId });
 	} catch (error) {
 		console.error("Error starting interview:", error);
 		res

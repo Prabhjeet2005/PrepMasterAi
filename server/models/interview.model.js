@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 
 const interviewSchema = new mongoose.Schema({
-	userId: { type: String, required: true }, // We'll use "user1" for now
+	userId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: "User",
+		required: true,
+	},
 	resumeText: { type: String }, // Store the parsed resume for context
 
 	// Store the conversation
@@ -31,6 +35,6 @@ const interviewSchema = new mongoose.Schema({
 		default: "active",
 	},
 	createdAt: { type: Date, default: Date.now },
-});
+},{timestamps:true});
 
 module.exports = mongoose.model("Interview", interviewSchema);

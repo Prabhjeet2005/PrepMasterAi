@@ -15,6 +15,7 @@ import {
 import { io } from "socket.io-client";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuthContext } from "@/context/AuthContext";
 
 export default function InterviewPage() {
 	const router = useRouter();
@@ -35,6 +36,8 @@ export default function InterviewPage() {
 	);
 	const [userSubtitle, setUserSubtitle] = useState("");
 	const [voices, setVoices] = useState([]);
+
+	const {authUser} = useAuthContext();
 
 	const mediaRecorderRef = useRef(null);
 	const messagesEndRef = useRef(null);
@@ -189,7 +192,7 @@ export default function InterviewPage() {
 			...prev,
 			{ sender: "user", text: placeholderText, isPending: true },
 		]);
-		if (socket) socket.emit("commit-answer");
+		if (socket) socket.emit("commit-answer", authUser._id);
 	};
 
 	const interruptAi = () => {
@@ -411,7 +414,7 @@ export default function InterviewPage() {
 								onClick={() => {
 									setShowEndModal(false);
 									setStatus("Generating...");
-									if (socket) socket.emit("end-interview");
+									if (socket) socket.emit("end-interview", authUser._id);
 								}}
 								className="flex-1 py-2 md:py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold text-sm md:text-base transition-colors">
 								End Session

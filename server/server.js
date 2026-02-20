@@ -17,7 +17,10 @@ const server = http.createServer(app);
 // Middleware
 app.use(
 	cors({
-		origin: "*", // <--- Allow requests from any URL (including Vercel)
+		origin: [
+			"http://localhost:3000",
+			"https://prep-master-ai-client.vercel.app",
+		], // <--- Allow requests from any URL (including Vercel)
 		methods: ["GET", "POST", "PUT", "DELETE"],
 		credentials: true,
 	}),
@@ -38,7 +41,10 @@ app.use("/api/interview", interviewRouter);
 // SOCKET
 const io = new Server(server, {
 	cors: {
-		origin: "*", // <--- Allow WebSockets from any URL
+		origin: [
+			"http://localhost:3000",
+			"https://prep-master-ai-client.vercel.app",
+		], // <--- Allow WebSockets from any URL
 		methods: ["GET", "POST"],
 	},
 });
