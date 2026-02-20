@@ -43,4 +43,33 @@ const getAllAssessments = async (req, res) => {
 	}
 };
 
-module.exports = { createAssessment, getAllAssessments };
+const getAssessmentById = async (req, res) => {
+	try {
+		const { id } = req.params;
+		// .lean() allows us to easily modify the object before sending it
+		const assessment = await Assessment.findById(id).lean();
+
+		if (!assessment || !assessment.isActive) {
+			return res.status(404).json({ error: "Assessment not found" });
+		}
+
+		// 1. Remove MCQ answers so the user can't cheat
+		assessment.mcqs.forEach((mcq) => {
+			delete mcq.correctAnswerIndex;
+		});
+
+		// 2. Remove HIDDEN test cases, but keep the visible ones for the UI
+		assessment.dsaQuestions.forEach((dsa) => {
+			if (dsa.testCases) {
+				dsa.testCases = dsa.testCases.filter((tc) => !tc.isHidden);
+			}
+		});
+
+		res.status(200).json(assessment);
+	} catch (error) {
+		console.error("Fetch Assessment Error:", error);
+		res.status(500).json({ error: "Failed to fetch assessment" });
+	}
+};
+
+module.exports = { createAssessment, getAllAssessments, getAssessmentById };

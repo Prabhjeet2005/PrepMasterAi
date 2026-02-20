@@ -39,22 +39,18 @@ export default function AssessmentEnvironment() {
 		const fetchAssessment = async () => {
 			try {
 				const res = await axios.get(
-					`${process.env.NEXT_PUBLIC_API_URL}/api/assessment`,
+					`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}`,
 					{
 						withCredentials: true,
 					},
 				);
-				// Find the specific assessment (Since our API currently returns all active ones)
-				// In production, you'd make a specific GET /api/assessment/:id route
-				const found = res.data.find((a) => a._id === id);
-				if (found) {
-					setAssessment(found);
-					setTimeLeft(found.durationMinutes * 60); // Convert to seconds
-				} else {
-					router.push("/assessments");
-				}
+			
+				setAssessment(res.data);
+				setTimeLeft(res.data.durationMinutes * 60); // Convert to seconds
+				
 			} catch (err) {
 				console.error(err);
+        router.push("/assessments")
 			} finally {
 				setLoading(false);
 			}
@@ -258,8 +254,7 @@ export default function AssessmentEnvironment() {
 								<h3 className="text-lg font-bold text-slate-400 mb-4 border-b border-slate-800 pb-2">
 									Examples:
 								</h3>
-								{currentDsa.testCases
-									.filter((tc) => !tc.isHidden)
+								{(currentDsa.testCases || [])
 									.map((tc, idx) => (
 										<div
 											key={idx}
