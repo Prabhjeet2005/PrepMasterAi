@@ -40,6 +40,11 @@ export default function Navbar() {
 				) : authUser ? (
 					// LOGGED IN VIEW
 					<div className="flex items-center gap-4">
+						<Link
+							href="/user-dashboard"
+							className="text-sm font-bold text-slate-300 hover:text-white transition-colors mr-2">
+							Dashboard
+						</Link>
 						<div className="flex items-center gap-2 text-slate-300 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
 							<UserIcon size={16} className="text-blue-400" />
 							<span className="text-sm font-medium">{authUser.name}</span>

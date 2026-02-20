@@ -1,5 +1,6 @@
 require("dotenv").config();
 const aiService = require('../services/ai.service.js'); // Import the adapter
+const Interview = require("../models/interview.model.js");
 const pdf = require("pdf-extraction"); // NEW LIBRARY
 const fs = require("fs");
 
@@ -129,4 +130,42 @@ const speakController = async (req, res) => {
 	}
 };
 
-module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController };
+const getDashboardData = async (req, res) => {
+	try {
+		// req.user._id comes from our protectRoute bouncer!
+		// .sort({ createdAt: -1 }) ensures the newest interviews show up first
+		const interviews = await Interview.find({ userId: req.user._id }).sort(
+			{ createdAt: -1 },
+		);
+
+		res.status(200).json(interviews);
+	} catch (error) {
+		console.error("Dashboard Error:", error);
+		res.status(500).json({ error: "Failed to fetch interviews" });
+	}
+};
+
+const getInterviewById = async (req, res) => {
+	try {
+		const { id } = req.params;
+
+		// Find the interview AND ensure the userId matches the logged-in user
+		const interview = await Interview.findOne({
+			_id: id,
+			userId: req.user._id,
+		});
+
+		if (!interview) {
+			return res
+				.status(404)
+				.json({ error: "Interview not found or unauthorized" });
+		}
+
+		res.status(200).json(interview);
+	} catch (error) {
+		console.error("Fetch Interview Error:", error);
+		res.status(500).json({ error: "Failed to fetch interview details" });
+	}
+};
+
+module.exports = { chatWithAIController, startInterviewController, speakController,generateFeedbackController, getDashboardData,getInterviewById };
