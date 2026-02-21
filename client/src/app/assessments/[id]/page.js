@@ -16,23 +16,11 @@ import {
 	FileText,
 	Code2,
 	GripVertical,
+	AlertTriangle,
 } from "lucide-react";
 
 // --- C++ ONLY BOILERPLATE ---
-const CPP_BOILERPLATE = `#include <iostream>
-#include <vector>
-using namespace std;
-
-int main() {
-    // Optimize standard I/O operations for performance
-    ios_base::sync_with_stdio(false);
-    cin.tie(NULL);
-    
-    // Write your logic here...
-    // Example: int n; cin >> n; 
-    
-    return 0;
-}`;
+const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // Optimize standard I/O operations for performance\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    // Example: int n; cin >> n; \n    \n    return 0;\n}`;
 
 export default function AssessmentEnvironment() {
 	const { id } = useParams();
@@ -52,6 +40,41 @@ export default function AssessmentEnvironment() {
 	const [executionResults, setExecutionResults] = useState(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
+	// --- PROCTORING & CUSTOM UI STATES ---
+	const [hasStarted, setHasStarted] = useState(false);
+	const [isFullscreen, setIsFullscreen] = useState(false);
+	const [warnings, setWarnings] = useState(0);
+	const [showWarningModal, setShowWarningModal] = useState(false);
+	const [showConfirmModal, setShowConfirmModal] = useState(false); // NEW: Custom Confirm Modal State
+	const [violationMessage, setViolationMessage] = useState("");
+	const [toastMessage, setToastMessage] = useState("");
+	const MAX_WARNINGS = 3;
+
+	// --- REFS (Crucial for Event Listeners & Polling) ---
+	const codeRef = useRef(code);
+	const mcqAnswersRef = useRef(mcqAnswers);
+	const isFullscreenRef = useRef(false);
+	const hasStartedRef = useRef(false);
+	const lastViolationTime = useRef(0);
+	const isSubmittingRef = useRef(isSubmitting);
+	const showWarningModalRef = useRef(showWarningModal);
+
+	useEffect(() => {
+		codeRef.current = code;
+	}, [code]);
+	useEffect(() => {
+		mcqAnswersRef.current = mcqAnswers;
+	}, [mcqAnswers]);
+	useEffect(() => {
+		hasStartedRef.current = hasStarted;
+	}, [hasStarted]);
+	useEffect(() => {
+		isSubmittingRef.current = isSubmitting;
+	}, [isSubmitting]);
+	useEffect(() => {
+		showWarningModalRef.current = showWarningModal;
+	}, [showWarningModal]);
+
 	// --- NEW UI STATES ---
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 	const [leftPanelWidth, setLeftPanelWidth] = useState(50); // percentage
@@ -66,9 +89,7 @@ export default function AssessmentEnvironment() {
 			try {
 				const res = await axios.get(
 					`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}`,
-					{
-						withCredentials: true,
-					},
+					{ withCredentials: true },
 				);
 				setAssessment(res.data);
 				setTimeLeft(res.data.durationMinutes * 60);
@@ -85,101 +106,297 @@ export default function AssessmentEnvironment() {
 
 	// Timer
 	useEffect(() => {
-		if (timeLeft <= 0 || loading) return;
+		if (timeLeft <= 0 || loading || !hasStarted || showWarningModal)
+			return;
 		const timer = setInterval(() => {
 			setTimeLeft((prev) => {
 				if (prev <= 1) {
 					clearInterval(timer);
-					submitAssessment();
+					submitAssessment(true);
 					return 0;
 				}
 				return prev - 1;
 			});
 		}, 1000);
 		return () => clearInterval(timer);
-	}, [timeLeft, loading]);
+	}, [timeLeft, loading, hasStarted, showWarningModal]);
 
-	// --- DRAG TO RESIZE LOGIC ---
+	// Drag Resizer
 	useEffect(() => {
 		const handleMouseMove = (e) => {
 			if (!isDragging || !splitContainerRef.current) return;
 			const containerRect =
 				splitContainerRef.current.getBoundingClientRect();
-			// Calculate new percentage based on mouse X position relative to container
 			const newLeftWidth =
 				((e.clientX - containerRect.left) / containerRect.width) * 100;
-			// Clamp the width between 20% and 80% so panels don't completely disappear
-			if (newLeftWidth >= 20 && newLeftWidth <= 80) {
+			if (newLeftWidth >= 20 && newLeftWidth <= 80)
 				setLeftPanelWidth(newLeftWidth);
-			}
 		};
-
-		const handleMouseUp = () => {
-			setIsDragging(false);
-		};
+		const handleMouseUp = () => setIsDragging(false);
 
 		if (isDragging) {
 			document.addEventListener("mousemove", handleMouseMove);
 			document.addEventListener("mouseup", handleMouseUp);
 		}
-
 		return () => {
 			document.removeEventListener("mousemove", handleMouseMove);
 			document.removeEventListener("mouseup", handleMouseUp);
 		};
 	}, [isDragging]);
 
-	const formatTime = (seconds) => {
-		const m = Math.floor(seconds / 60);
-		const s = seconds % 60;
-		return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+	// ==========================================
+	// BULLETPROOF ANTI-CHEAT ENGINE (With 10s Poller)
+	// ==========================================
+	const checkIsFullscreen = () => {
+		if (document.fullscreenElement) {
+			return true;
+		} else {
+			return false;
+		}
+	};
+
+	const requestFullscreen = async () => {
+		const docElm = document.documentElement;
+		if (docElm.requestFullscreen) await docElm.requestFullscreen();
+		else if (docElm.webkitRequestFullscreen)
+			await docElm.webkitRequestFullscreen();
+		else if (docElm.mozRequestFullScreen)
+			await docElm.mozRequestFullScreen();
+		else if (docElm.msRequestFullscreen)
+			await docElm.msRequestFullscreen();
+	};
+
+	const exitFullscreen = async () => {
+		if (document.exitFullscreen && document.fullscreenElement)
+			await document.exitFullscreen();
+		else if (
+			document.webkitExitFullscreen &&
+			document.webkitFullscreenElement
+		)
+			await document.webkitExitFullscreen();
+	};
+
+	const handleViolation = (reason) => {
+		if (isSubmittingRef.current) return;
+
+		// Debounce: Prevents multiple strikes if multiple events fire at the exact same millisecond
+		const now = Date.now();
+		if (now - lastViolationTime.current < 2000) return;
+		lastViolationTime.current = now;
+
+		setWarnings((prev) => {
+			const newWarnings = prev + 1;
+			setViolationMessage(
+				newWarnings >= MAX_WARNINGS
+					? `🚨 ${reason}. You reached 3 strikes.`
+					: reason,
+			);
+			setShowWarningModal(true);
+			if (newWarnings >= MAX_WARNINGS) {
+				submitAssessment(true); // Force auto-submit
+			}
+			return newWarnings;
+		});
+	};
+
+	useEffect(() => {
+		if (!hasStarted) return;
+
+		// Event: Browser actually fires the fullscreen change event
+		const monitorFs = () => {
+			const current = checkIsFullscreen();
+			if (isFullscreenRef.current !== current) {
+				isFullscreenRef.current = current;
+				setIsFullscreen(current);
+				if (
+					!current &&
+					hasStartedRef.current &&
+					!showWarningModalRef.current
+				) {
+					handleViolation(
+						"Exiting Fullscreen mode is strictly prohibited",
+					);
+				}
+			}
+		};
+
+		// Event: Switching Tabs
+		const handleVisibilityChange = () => {
+			if (document.hidden && hasStartedRef.current)
+				handleViolation("Switching tabs is strictly prohibited");
+		};
+
+		// Event: Virtual Desktop or App Switching (Window loses focus)
+		const handleBlur = () => {
+			if (hasStartedRef.current && !showWarningModalRef.current) {
+				handleViolation(
+					"Leaving the assessment window (Virtual Desktops/App switching) is prohibited",
+				);
+			}
+		};
+
+		// Event: Copy / Paste Disable via Capturing
+		const preventCopyPaste = (e) => {
+			if (hasStartedRef.current && !showWarningModalRef.current) {
+				e.preventDefault();
+				e.stopPropagation();
+				setToastMessage("⚠️ Copying and Pasting is strictly disabled.");
+				setTimeout(() => setToastMessage(""), 3000);
+			}
+		};
+
+		// --- THE 10-SECOND HEARTBEAT POLLER ---
+		const securityPoller = setInterval(() => {
+			if (
+				hasStartedRef.current &&
+				!showWarningModalRef.current &&
+				!isSubmittingRef.current
+			) {
+				const current = checkIsFullscreen();
+				if (!current) {
+					handleViolation(
+						"Exited Fullscreen mode (Detected by Security Poller)",
+					);
+					isFullscreenRef.current = false;
+					setIsFullscreen(false);
+				}
+			}
+		}, 10000); // Polls every 10 seconds
+
+		document.addEventListener("fullscreenchange", monitorFs);
+		document.addEventListener("webkitfullscreenchange", monitorFs);
+		document.addEventListener("mozfullscreenchange", monitorFs);
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		window.addEventListener("blur", handleBlur);
+		window.addEventListener("copy", preventCopyPaste, { capture: true });
+		window.addEventListener("paste", preventCopyPaste, { capture: true });
+		window.addEventListener("contextmenu", preventCopyPaste, {
+			capture: true,
+		});
+
+		return () => {
+			clearInterval(securityPoller);
+			document.removeEventListener("fullscreenchange", monitorFs);
+			document.removeEventListener("webkitfullscreenchange", monitorFs);
+			document.removeEventListener("mozfullscreenchange", monitorFs);
+			document.removeEventListener(
+				"visibilitychange",
+				handleVisibilityChange,
+			);
+			window.removeEventListener("blur", handleBlur);
+			window.removeEventListener("copy", preventCopyPaste, {
+				capture: true,
+			});
+			window.removeEventListener("paste", preventCopyPaste, {
+				capture: true,
+			});
+			window.removeEventListener("contextmenu", preventCopyPaste, {
+				capture: true,
+			});
+		};
+	}, [hasStarted]);
+
+	// --- ENFORCED GATEWAY LOGIC ---
+	const startAssessment = async () => {
+		try {
+			await requestFullscreen();
+			setTimeout(() => {
+				if (checkIsFullscreen()) {
+					setHasStarted(true);
+					setIsFullscreen(true);
+					isFullscreenRef.current = true;
+				} else {
+					alert(
+						"Fullscreen is required to start the assessment. Please click allow.",
+					);
+				}
+			}, 300);
+		} catch (err) {
+			alert("You must allow fullscreen to take this assessment.");
+		}
+	};
+
+	const handleAcknowledgeWarning = async () => {
+		try {
+			await requestFullscreen();
+			// Wait to verify the browser actually entered fullscreen before hiding the warning
+			setTimeout(() => {
+				if (checkIsFullscreen()) {
+					setShowWarningModal(false);
+					setViolationMessage("");
+					setIsFullscreen(true);
+					isFullscreenRef.current = true;
+				} else {
+					setToastMessage(
+						"Browser blocked request. Please click 'I Understand' again.",
+					);
+					setTimeout(() => setToastMessage(""), 3000);
+				}
+			}, 400);
+		} catch (e) {
+			console.error("Could not return to fullscreen", e);
+		}
+	};
+
+	const submitAssessment = async (isAutoSubmit = false) => {
+		if (isSubmittingRef.current) return;
+
+		// SYNCHRONOUSLY LOCK THE REF so proctoring immediately ignores blur events
+		isSubmittingRef.current = true;
+		setIsSubmitting(true);
+		setShowConfirmModal(false); // Hide our custom modal if it was open
+
+		try {
+			const finalCode = isAutoSubmit ? codeRef.current : code;
+			const finalAnswers = isAutoSubmit
+				? mcqAnswersRef.current
+				: mcqAnswers;
+
+			const res = await axios.post(
+				`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}/submit`,
+				{
+					mcqAnswers: finalAnswers,
+					code: finalCode,
+					language: "cpp",
+				},
+				{ withCredentials: true },
+			);
+			if (res) {
+				setHasStarted(false);
+			}
+
+			// Because isSubmittingRef.current is true, this alert won't trigger a strike!
+			alert(
+				`Assessment Submitted! Your preliminary score is: ${res.data.totalScore.toFixed(2)}`,
+			);
+
+			setTimeout(() => {
+				router.push("/assessments");
+			}, 500);
+		} catch (error) {
+			console.error("Submission failed:", error);
+			if (!isAutoSubmit)
+				alert("Failed to submit assessment. Please try again.");
+
+			// Unlock if it failed so they can keep trying
+			setIsSubmitting(false);
+			isSubmittingRef.current = false;
+		}
 	};
 
 	const handleMcqSelect = (optionIndex) => {
 		setMcqAnswers((prev) => ({ ...prev, [currentMcqIndex]: optionIndex }));
 	};
 
-	const submitAssessment = async () => {
-		if (!confirm("Are you sure you want to submit? You cannot change your answers after this.")) return;
-        
-        setIsSubmitting(true);
-				setTimeLeft(0)
-        try {
-            const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}/submit`, {
-                mcqAnswers,
-                code,
-                language: "cpp"
-            }, { withCredentials: true });
-
-            alert(`Assessment Submitted! Your preliminary score is: ${res.data.totalScore.toFixed(2)}`);
-            
-            // Redirect the user back to the assessments list (or we can build a specific results page later)
-            router.push("/assessments");
-
-        } catch (error) {
-            console.error("Submission failed:", error);
-            alert("Failed to submit assessment. Please try again.");
-        } finally {
-            setIsSubmitting(false);
-        }
-	};
-
 	const runCode = async () => {
 		setIsCompiling(true);
 		setExecutionResults(null);
-
 		try {
-			const visibleTestCases = currentDsa.testCases;
 			const res = await axios.post(
 				`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/execute`,
-				{
-					code,
-					language: "cpp",
-					testCases: visibleTestCases,
-				},
+				{ code, language: "cpp", testCases: currentDsa.testCases },
 				{ withCredentials: true },
 			);
-
 			setExecutionResults(res.data.results);
 		} catch (error) {
 			console.error("Compilation error:", error);
@@ -194,26 +411,156 @@ export default function AssessmentEnvironment() {
 		}
 	};
 
-	if (loading || authLoading) {
+	const formatTime = (seconds) => {
+		const m = Math.floor(seconds / 60);
+		const s = seconds % 60;
+		return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+	};
+
+	if (loading || authLoading)
 		return (
 			<div className="min-h-screen bg-slate-950 flex items-center justify-center">
 				<Loader2 className="animate-spin text-blue-500" size={48} />
 			</div>
 		);
-	}
-
 	if (!assessment) return null;
 
+	// ==========================================
+	// DOM CONDITIONAL RENDERING (THE LOCKDOWN)
+	// ==========================================
+
+	// 1. GATEWAY SCREEN (Before they click start)
+	if (!hasStarted) {
+		return (
+			<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4">
+				<div className="max-w-xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl text-center">
+					<div className="w-16 h-16 bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">
+						<Info size={32} />
+					</div>
+					<h1 className="text-2xl font-bold mb-2">{assessment.title}</h1>
+					<p className="text-slate-400 mb-8">{assessment.description}</p>
+
+					<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl mb-8 text-left">
+						<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2">
+							⚠️ Strict Proctoring Rules
+						</h3>
+						<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
+							<li>Your browser will be locked into Fullscreen mode.</li>
+							<li>
+								<strong>
+									Do not switch tabs, minimize, or use virtual desktops.
+								</strong>
+							</li>
+							<li>
+								3 Strikes will result in automatic submission and failure.
+							</li>
+							<li>Copying and pasting code is strictly prohibited.</li>
+						</ul>
+					</div>
+
+					<button
+						onClick={startAssessment}
+						className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl text-lg transition-colors shadow-lg shadow-blue-900/20">
+						Accept Rules & Start Assessment
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	// 2. RED SCREEN OF DEATH (Completely removes test DOM from the screen if compromised)
+	if (showWarningModal || !isFullscreen) {
+		return (
+			<div className="min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-8 text-center relative">
+				{toastMessage && (
+					<div className="absolute top-10 bg-red-600 px-6 py-3 rounded-xl font-bold shadow-2xl animate-bounce">
+						{toastMessage}
+					</div>
+				)}
+
+				<AlertTriangle
+					size={80}
+					className="text-red-500 mb-6 animate-pulse"
+				/>
+				<h1 className="text-5xl font-black text-white mb-4 tracking-tight">
+					PROCTORING WARNING
+				</h1>
+				<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
+					<p className="text-xl text-red-100 font-bold">
+						{violationMessage || "You are out of fullscreen mode."}
+					</p>
+				</div>
+
+				{warnings >= MAX_WARNINGS ? (
+					<div className="text-xl font-bold animate-pulse text-red-300">
+						Auto-Submitting Assessment...
+					</div>
+				) : (
+					<>
+						<p className="text-2xl font-bold text-slate-300 mb-2">
+							Strike{" "}
+							<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
+							{MAX_WARNINGS}
+						</p>
+						<p className="text-slate-400 mb-10 max-w-md mx-auto">
+							If you continue to violate proctoring rules, your test will
+							be automatically terminated.
+						</p>
+						<button
+							onClick={handleAcknowledgeWarning}
+							className="bg-white text-red-900 font-black px-10 py-5 rounded-xl text-xl hover:bg-slate-200 transition-transform hover:scale-105 shadow-2xl">
+							I Understand. Return to Test in Fullscreen.
+						</button>
+					</>
+				)}
+			</div>
+		);
+	}
+
+	// 3. MAIN TEST RENDER (Only exists if strictly in Fullscreen)
 	const currentMcq = assessment.mcqs[currentMcqIndex];
 	const currentDsa = assessment.dsaQuestions[0];
 
 	return (
 		<div
 			className={`h-[100dvh] bg-slate-950 text-white flex flex-col overflow-hidden ${isDragging ? "select-none cursor-col-resize" : ""}`}>
+			{/* CUSTOM COPY/PASTE TOAST */}
+			{toastMessage && (
+				<div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[9999] bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-2xl animate-bounce">
+					{toastMessage}
+				</div>
+			)}
+
+			{/* --- NEW: CUSTOM CONFIRMATION MODAL --- */}
+			{showConfirmModal && (
+				<div className="fixed inset-0 z-[9999] bg-slate-950/80 flex items-center justify-center p-4 backdrop-blur-sm">
+					<div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl max-w-md w-full shadow-2xl text-center">
+						<h2 className="text-2xl font-bold text-white mb-4">
+							Submit Assessment?
+						</h2>
+						<p className="text-slate-300 mb-8">
+							Are you sure you want to end the test? You will not be able
+							to modify your answers after this.
+						</p>
+						<div className="flex justify-center gap-4">
+							<button
+								onClick={() => setShowConfirmModal(false)}
+								className="px-6 py-3 rounded-xl font-bold text-slate-300 hover:bg-slate-800 transition-colors w-1/2">
+								Cancel
+							</button>
+							<button
+								onClick={() => submitAssessment(false)}
+								className="px-6 py-3 rounded-xl font-bold bg-green-600 hover:bg-green-500 text-white transition-colors w-1/2">
+								Yes, Submit
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* TOP NAVIGATION BAR */}
 			<div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-20">
 				<div className="flex items-center gap-4">
-					{/* COLLAPSE SIDEBAR TOGGLE */}
 					<button
 						onClick={() => setIsSidebarOpen(!isSidebarOpen)}
 						className="text-slate-400 hover:text-white transition-colors"
@@ -230,15 +577,32 @@ export default function AssessmentEnvironment() {
 				</div>
 
 				<div className="flex items-center gap-4 md:gap-6">
+					<div className="hidden md:flex items-center gap-2 bg-red-950/30 border border-red-900/50 px-3 py-1.5 rounded-lg">
+						<AlertTriangle
+							size={16}
+							className={warnings > 0 ? "text-red-500" : "text-slate-500"}
+						/>
+						<span className="text-sm font-bold text-slate-300">
+							Strikes:{" "}
+							<span
+								className={
+									warnings > 0 ? "text-red-400" : "text-slate-500"
+								}>
+								{warnings}/{MAX_WARNINGS}
+							</span>
+						</span>
+					</div>
+
 					<div
 						className={`flex items-center gap-2 font-mono text-lg md:text-xl font-bold px-3 py-1.5 rounded-lg ${timeLeft < 300 ? "bg-red-900/50 text-red-400 border border-red-500/50 animate-pulse" : "bg-slate-800 text-blue-400"}`}>
 						<Clock size={20} />
 						{formatTime(timeLeft)}
 					</div>
+					{/* UPDATED BUTTON: Now triggers the custom modal instead of native confirm */}
 					<button
-						onClick={submitAssessment}
+						onClick={() => setShowConfirmModal(true)}
 						disabled={isSubmitting}
-						className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg transition-colors shadow-lg shadow-green-900/20">
+						className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg transition-colors shadow-lg shadow-red-900/20">
 						{isSubmitting ? (
 							<Loader2 className="animate-spin" size={18} />
 						) : null}
@@ -372,7 +736,6 @@ export default function AssessmentEnvironment() {
 									</p>
 								</div>
 
-								{/* INPUT FORMAT BLOCK */}
 								<div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-5 mb-8">
 									<h3 className="text-blue-400 font-bold flex items-center gap-2 mb-2">
 										<Info size={18} /> Input Format
@@ -442,7 +805,6 @@ export default function AssessmentEnvironment() {
 									<div className="text-sm font-bold text-slate-300 bg-slate-800 border border-slate-700 rounded px-3 py-1">
 										C++ (GCC)
 									</div>
-
 									<button
 										onClick={runCode}
 										disabled={isCompiling}
@@ -451,7 +813,7 @@ export default function AssessmentEnvironment() {
 											<Loader2 className="animate-spin" size={16} />
 										) : (
 											<Play size={16} />
-										)}
+										)}{" "}
 										Run Code
 									</button>
 								</div>
@@ -478,21 +840,18 @@ export default function AssessmentEnvironment() {
 									<div className="text-slate-500 mb-4 font-bold uppercase tracking-wider text-xs">
 										Terminal Output
 									</div>
-
 									{!executionResults && !isCompiling && (
 										<div className="text-slate-400">
 											Click "Run Code" to compile and execute your solution
 											against the visible test cases.
 										</div>
 									)}
-
 									{isCompiling && (
 										<div className="text-blue-400 flex items-center gap-2 animate-pulse">
 											<Loader2 size={16} className="animate-spin" />{" "}
 											Compiling and running on Wandbox server...
 										</div>
 									)}
-
 									{executionResults && (
 										<div className="space-y-4">
 											{executionResults.map((result, idx) => (
@@ -510,7 +869,6 @@ export default function AssessmentEnvironment() {
 															</span>
 														)}
 													</div>
-
 													<div className="grid grid-cols-1 gap-2 text-xs">
 														<div>
 															<span className="text-slate-500">
@@ -523,7 +881,7 @@ export default function AssessmentEnvironment() {
 														<div>
 															<span className="text-slate-500">
 																Output:
-															</span>
+															</span>{" "}
 															<span
 																className={
 																	result.hasError
