@@ -270,4 +270,59 @@ const getUserAssessmentHistory = async (req, res) => {
 	}
 };
 
-module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode, submitAssessment, getUserAssessmentHistory };
+const getAssessmentResultById = async (req, res) => {
+	try {
+		// Populate the assessmentId to get the title
+		const result = await AssessmentResult.findById(req.params.id).populate(
+			"assessmentId",
+			"title description",
+		);
+
+		if (!result)
+			return res.status(404).json({ error: "Result not found" });
+		res.status(200).json(result);
+	} catch (error) {
+		console.error("Fetch Result Error:", error);
+		res.status(500).json({ error: "Failed to fetch assessment result" });
+	}
+};
+
+// 2. Fetch all OAs created by the logged-in Recruiter
+const getRecruiterAssessments = async (req, res) => {
+	try {
+		if (req.user.role !== "recruiter" && req.user.role !== "admin") {
+			return res.status(403).json({ error: "Unauthorized access" });
+		}
+		const assessments = await Assessment.find({
+			createdBy: req.user._id,
+		}).sort({ createdAt: -1 });
+		res.status(200).json(assessments);
+	} catch (error) {
+		console.error("Fetch Recruiter OAs Error:", error);
+		res
+			.status(500)
+			.json({ error: "Failed to fetch recruiter assessments" });
+	}
+};
+
+// 3. Fetch all Student Submissions for a specific OA (Leaderboard)
+const getAssessmentSubmissions = async (req, res) => {
+	try {
+		if (req.user.role !== "recruiter" && req.user.role !== "admin") {
+			return res.status(403).json({ error: "Unauthorized access" });
+		}
+		// Populate the userId to get the student's name and email!
+		const submissions = await AssessmentResult.find({
+			assessmentId: req.params.id,
+		})
+			.populate("userId", "name email")
+			.sort({ totalScore: -1 }); // Sort by highest score first
+
+		res.status(200).json(submissions);
+	} catch (error) {
+		console.error("Fetch Submissions Error:", error);
+		res.status(500).json({ error: "Failed to fetch submissions" });
+	}
+};
+
+module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode, submitAssessment, getUserAssessmentHistory,getAssessmentResultById, getRecruiterAssessments ,getAssessmentSubmissions };

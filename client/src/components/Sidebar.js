@@ -17,7 +17,8 @@ import {
 	Video,
 	PlusCircle,
   Speech,
-  FileEdit
+  FileEdit,
+  Briefcase
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -65,6 +66,11 @@ export default function Sidebar() {
 	];
 
   if (authUser?.role === "recruiter" || authUser?.role === "admin") {
+		navLinks.push({
+			name: "Recruiter Portal",
+			href: "/recruiter/dashboard",
+			icon: Briefcase,
+		});
 		navLinks.push({
 			name: "Create OA",
 			href: "/recruiter/create-oa",
