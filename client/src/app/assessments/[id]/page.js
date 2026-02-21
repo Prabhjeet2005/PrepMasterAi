@@ -50,6 +50,7 @@ export default function AssessmentEnvironment() {
 	const [code, setCode] = useState(CPP_BOILERPLATE);
 	const [isCompiling, setIsCompiling] = useState(false);
 	const [executionResults, setExecutionResults] = useState(null);
+	const [isSubmitting, setIsSubmitting] = useState(false);
 
 	// --- NEW UI STATES ---
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -138,10 +139,29 @@ export default function AssessmentEnvironment() {
 		setMcqAnswers((prev) => ({ ...prev, [currentMcqIndex]: optionIndex }));
 	};
 
-	const submitAssessment = () => {
-		alert(
-			"Time is up or you clicked submit! (Backend submission logic coming next)",
-		);
+	const submitAssessment = async () => {
+		if (!confirm("Are you sure you want to submit? You cannot change your answers after this.")) return;
+        
+        setIsSubmitting(true);
+				setTimeLeft(0)
+        try {
+            const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}/submit`, {
+                mcqAnswers,
+                code,
+                language: "cpp"
+            }, { withCredentials: true });
+
+            alert(`Assessment Submitted! Your preliminary score is: ${res.data.totalScore.toFixed(2)}`);
+            
+            // Redirect the user back to the assessments list (or we can build a specific results page later)
+            router.push("/assessments");
+
+        } catch (error) {
+            console.error("Submission failed:", error);
+            alert("Failed to submit assessment. Please try again.");
+        } finally {
+            setIsSubmitting(false);
+        }
 	};
 
 	const runCode = async () => {
@@ -217,8 +237,12 @@ export default function AssessmentEnvironment() {
 					</div>
 					<button
 						onClick={submitAssessment}
-						className="bg-green-600 hover:bg-green-500 text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg transition-colors shadow-lg shadow-green-900/20">
-						Submit Final
+						disabled={isSubmitting}
+						className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg transition-colors shadow-lg shadow-green-900/20">
+						{isSubmitting ? (
+							<Loader2 className="animate-spin" size={18} />
+						) : null}
+						{isSubmitting ? "Grading..." : "End Assessment"}
 					</button>
 				</div>
 			</div>

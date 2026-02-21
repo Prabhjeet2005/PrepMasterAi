@@ -1,4 +1,5 @@
 const Assessment = require("../models/assessment.model.js");
+const AssessmentResult = require("../models/assessmentResult.model.js");
 const axios = require("axios");
 
 // 1. Create a new Assessment (Admin/Recruiter)
@@ -141,7 +142,7 @@ const executeCode = async (req, res) => {
 				hasError: isError,
 			});
 		}
-		
+
 		res.status(200).json({ results });
 	} catch (error) {
 		console.error("Wandbox Execution Error:", error.message);
@@ -151,4 +152,122 @@ const executeCode = async (req, res) => {
 	}
 };
 
-module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode };
+const submitAssessment = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const { mcqAnswers, code, language } = req.body;
+
+		// 1. Fetch the FULL assessment (including hidden test cases and answers)
+		const assessment = await Assessment.findById(id);
+		if (!assessment)
+			return res.status(404).json({ error: "Assessment not found" });
+
+		let mcqScore = 0;
+		let dsaScore = 0;
+
+		// 2. GRADE MCQs
+		if (assessment.mcqs && assessment.mcqs.length > 0) {
+			assessment.mcqs.forEach((mcq, index) => {
+				// If the user's answer matches the correct index, award marks
+				if (mcqAnswers[index] === mcq.correctAnswerIndex) {
+					mcqScore += mcq.marks;
+				}
+			});
+		}
+
+		// 3. GRADE DSA (Run against ALL test cases via Wandbox)
+		const testCaseResults = [];
+		let passedCases = 0;
+		const dsaQuestion = assessment.dsaQuestions[0]; // Assuming 1 DSA for now
+
+		if (dsaQuestion && dsaQuestion.testCases.length > 0) {
+			const totalCases = dsaQuestion.testCases.length;
+
+			for (const tc of dsaQuestion.testCases) {
+				// Compile on Wandbox
+				const response = await axios.post(
+					"https://wandbox.org/api/compile.json",
+					{
+						compiler: "gcc-head", // Hardcoded C++ for now based on our UI
+						code: code,
+						stdin: tc.input,
+					},
+				);
+
+				const data = response.data;
+				const output = (
+					data.program_out ||
+					data.program_message ||
+					data.stdout ||
+					""
+				).trim();
+				const errorStr = (
+					data.compiler_error ||
+					data.program_err ||
+					""
+				).trim();
+
+				const isError = data.status !== "0" || errorStr !== "";
+				const finalOutput = isError ? errorStr : output;
+				const isPassed =
+					!isError && finalOutput === tc.expectedOutput.trim();
+
+				if (isPassed) passedCases++;
+
+				testCaseResults.push({
+					passed: isPassed,
+					input: tc.input,
+					expectedOutput: tc.expectedOutput,
+					actualOutput: finalOutput,
+					isHidden: tc.isHidden,
+				});
+			}
+
+			// Calculate DSA Score (Percentage of test cases passed * total marks)
+			dsaScore = (passedCases / totalCases) * dsaQuestion.marks;
+		}
+
+		const totalScore = mcqScore + dsaScore;
+
+		// 4. Save to Database
+		const result = new AssessmentResult({
+			userId: req.user._id,
+			assessmentId: assessment._id,
+			mcqScore,
+			dsaScore,
+			totalScore,
+			mcqAnswers,
+			submittedCode: code,
+			testCaseResults,
+		});
+
+		await result.save();
+
+		res.status(200).json({
+			message: "Assessment submitted successfully",
+			resultId: result._id,
+			totalScore,
+		});
+	} catch (error) {
+		console.error("Submit Assessment Error:", error);
+		res
+			.status(500)
+			.json({ error: "Failed to grade and submit assessment" });
+	}
+};
+
+const getUserAssessmentHistory = async (req, res) => {
+	try {
+		// Find all results for this user, sort by newest first
+		const results = await AssessmentResult.find({ userId: req.user._id })
+			.populate("assessmentId", "title durationMinutes") // Pull in the test title from the Assessment model
+			.sort({ createdAt: -1 });
+
+		res.status(200).json(results);
+	} catch (error) {
+		console.error("Fetch Assessment History Error:", error);
+		res.status(500).json({ error: "Failed to fetch assessment history" });
+	}
+};
+
+module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode, submitAssessment, getUserAssessmentHistory };
