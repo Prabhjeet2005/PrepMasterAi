@@ -41,6 +41,12 @@ export default function Navbar() {
 					// LOGGED IN VIEW
 					<div className="flex items-center gap-4">
 						<Link
+							href="/assessments"
+							className="text-sm font-bold text-slate-300 hover:text-white transition-colors">
+							OAs & Coding
+						</Link>
+						
+						<Link
 							href="/user-dashboard"
 							className="text-sm font-bold flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors mr-2">
 							Your Dashboard <Gauge size={18} />

@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const interviewRouter = require("./routes/interview.routes");
 const setupSocket = require("./sockets/socketHandler");
+const assessmentRoutes = require("./routes/assessment.routes.js");
 
 
 const app = express(); 
@@ -37,6 +38,7 @@ mongoose
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
 app.use("/api/auth", authRoutes);
 app.use("/api/interview", interviewRouter);
+app.use("/api/assessment", assessmentRoutes);
 
 // SOCKET
 const io = new Server(server, {
