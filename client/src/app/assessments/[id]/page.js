@@ -4,6 +4,8 @@ import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthContext } from "@/context/AuthContext";
 import Editor from "@monaco-editor/react";
+import { QRCodeSVG } from "qrcode.react"; // NEW IMPORT
+import { io } from "socket.io-client"; // NEW IMPORT
 import {
 	Loader2,
 	Clock,
@@ -17,10 +19,11 @@ import {
 	Code2,
 	GripVertical,
 	AlertTriangle,
+	Smartphone, // Added Smartphone icon
+	CheckCircle2,
 } from "lucide-react";
 
-// --- C++ ONLY BOILERPLATE ---
-const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // Optimize standard I/O operations for performance\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    // Example: int n; cin >> n; \n    \n    return 0;\n}`;
+const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
 
 export default function AssessmentEnvironment() {
 	const { id } = useParams();
@@ -45,12 +48,16 @@ export default function AssessmentEnvironment() {
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [warnings, setWarnings] = useState(0);
 	const [showWarningModal, setShowWarningModal] = useState(false);
-	const [showConfirmModal, setShowConfirmModal] = useState(false); // Custom Confirm Modal State
+	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [violationMessage, setViolationMessage] = useState("");
 	const [toastMessage, setToastMessage] = useState("");
 	const MAX_WARNINGS = 3;
 
-	// --- REFS (Crucial for Event Listeners & Polling) ---
+	// --- NEW: MULTI-DEVICE STATES ---
+	const [isMobileConnected, setIsMobileConnected] = useState(false);
+	const [pairingUrl, setPairingUrl] = useState("");
+
+	// --- REFS ---
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -58,6 +65,7 @@ export default function AssessmentEnvironment() {
 	const lastViolationTime = useRef(0);
 	const isSubmittingRef = useRef(isSubmitting);
 	const showWarningModalRef = useRef(showWarningModal);
+	const socketRef = useRef(null); // Keep track of the socket
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -75,9 +83,8 @@ export default function AssessmentEnvironment() {
 		showWarningModalRef.current = showWarningModal;
 	}, [showWarningModal]);
 
-	// --- NEW UI STATES ---
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-	const [leftPanelWidth, setLeftPanelWidth] = useState(50); // percentage
+	const [leftPanelWidth, setLeftPanelWidth] = useState(50);
 	const [isDragging, setIsDragging] = useState(false);
 	const splitContainerRef = useRef(null);
 
@@ -103,6 +110,45 @@ export default function AssessmentEnvironment() {
 
 		if (id) fetchAssessment();
 	}, [id, authUser, authLoading, router]);
+
+	// ==========================================
+	// NEW: SOCKET INITIALIZATION & PAIRING
+	// ==========================================
+	useEffect(() => {
+		if (!authUser || !id) return;
+
+		// Generate the unique room ID for this test session
+		const roomId = `${id}-${authUser._id}`;
+
+		// Generate the URL the phone will scan (Works on local Wi-Fi if using local IP)
+		if (typeof window !== "undefined") {
+			setPairingUrl(
+				`${window.location.protocol}//${window.location.host}/mobile-proctor/${roomId}`,
+			);
+		}
+
+		// Connect to Socket
+		const socket = io(process.env.NEXT_PUBLIC_API_URL);
+		socketRef.current = socket;
+
+		socket.on("connect", () => {
+			console.log("Laptop connected to socket. Creating room...");
+			socket.emit("create_proctoring_room", roomId);
+		});
+
+		socket.on("mobile_connected", () => {
+			console.log("Mobile device paired successfully!");
+			setIsMobileConnected(true);
+		});
+
+		// Listen for Strikes triggered by the Phone Camera
+		socket.on("trigger_laptop_strike", (reason) => {
+			// Re-use our existing bulletproof violation handler!
+			handleViolation(`Mobile Proctor Alert: ${reason}`);
+		});
+
+		return () => socket.disconnect();
+	}, [authUser, id]);
 
 	// Timer
 	useEffect(() => {
@@ -170,10 +216,10 @@ export default function AssessmentEnvironment() {
 			await document.webkitExitFullscreen();
 	};
 
+	// Note: We define this function up here so the Socket listener can use it too!
 	const handleViolation = (reason) => {
 		if (isSubmittingRef.current) return;
 
-		// Debounce: Prevents multiple strikes if multiple events fire at the exact same millisecond
 		const now = Date.now();
 		if (now - lastViolationTime.current < 2000) return;
 		lastViolationTime.current = now;
@@ -329,13 +375,11 @@ export default function AssessmentEnvironment() {
 	};
 
 	const submitAssessment = async (isAutoSubmit = false) => {
-		setTimeLeft(0)
 		if (isSubmittingRef.current) return;
 
-		// SYNCHRONOUSLY LOCK THE REF so proctoring immediately ignores blur events
 		isSubmittingRef.current = true;
 		setIsSubmitting(true);
-		setShowConfirmModal(false); // Hide our custom modal
+		setShowConfirmModal(false);
 
 		try {
 			const finalCode = isAutoSubmit ? codeRef.current : code;
@@ -362,7 +406,6 @@ export default function AssessmentEnvironment() {
 		} catch (error) {
 			console.error("Submission failed:", error);
 			if (!isAutoSubmit) {
-				// Replaced native alert with toast so the window doesn't lose focus
 				setToastMessage(
 					"❌ Failed to submit assessment. Please try again.",
 				);
@@ -414,40 +457,91 @@ export default function AssessmentEnvironment() {
 		);
 	if (!assessment) return null;
 
-	// 1. GATEWAY SCREEN
+	// ==========================================
+	// 1. RE-DESIGNED MULTI-DEVICE GATEWAY SCREEN
+	// ==========================================
 	if (!hasStarted) {
 		return (
 			<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4">
-				<div className="max-w-xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl text-center">
-					<div className="w-16 h-16 bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">
-						<Info size={32} />
-					</div>
-					<h1 className="text-2xl font-bold mb-2">{assessment.title}</h1>
-					<p className="text-slate-400 mb-8">{assessment.description}</p>
+				<div className="max-w-4xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl flex flex-col md:flex-row gap-10">
+					{/* LEFT COLUMN: RULES */}
+					<div className="flex-1 flex flex-col justify-center">
+						<div className="w-16 h-16 bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mb-6">
+							<Info size={32} />
+						</div>
+						<h1 className="text-3xl font-bold mb-2">{assessment.title}</h1>
+						<p className="text-slate-400 mb-8">{assessment.description}</p>
 
-					<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl mb-8 text-left">
-						<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2">
-							⚠️ Strict Proctoring Rules
+						<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl text-left shadow-lg">
+							<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2">
+								⚠️ Strict Proctoring Rules
+							</h3>
+							<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
+								<li>Your browser will be locked into Fullscreen mode.</li>
+								<li>
+									<strong>
+										Do not switch tabs, minimize, or use virtual desktops.
+									</strong>
+								</li>
+								<li>
+									<strong>
+										Your mobile phone camera must remain active
+									</strong>{" "}
+									to track your workspace.
+								</li>
+								<li>3 Strikes will result in automatic submission.</li>
+							</ul>
+						</div>
+					</div>
+
+					{/* RIGHT COLUMN: QR CODE PAIRING */}
+					<div className="w-full md:w-80 bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center text-center shadow-inner">
+						<h3 className="font-bold text-white mb-2 flex items-center gap-2">
+							<Smartphone size={20} className="text-blue-400" /> Step 1:
+							Link Device
 						</h3>
-						<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
-							<li>Your browser will be locked into Fullscreen mode.</li>
-							<li>
-								<strong>
-									Do not switch tabs, minimize, or use virtual desktops.
-								</strong>
-							</li>
-							<li>
-								3 Strikes will result in automatic submission and failure.
-							</li>
-							<li>Copying and pasting code is strictly prohibited.</li>
-						</ul>
-					</div>
+						<p className="text-xs text-slate-400 mb-6 px-4">
+							Scan this QR code with your phone to activate the secondary
+							camera.
+						</p>
 
-					<button
-						onClick={startAssessment}
-						className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl text-lg transition-colors shadow-lg shadow-blue-900/20">
-						Accept Rules & Start Assessment
-					</button>
+						<div className="bg-white p-4 rounded-xl mb-6 shadow-md">
+							{pairingUrl ? (
+								<QRCodeSVG value={pairingUrl} size={160} />
+							) : (
+								<Loader2 className="animate-spin text-slate-800" />
+							)}
+						</div>
+
+						<div className="w-full mb-6">
+							{isMobileConnected ? (
+								<div className="bg-green-900/30 border border-green-500/50 text-green-400 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2">
+									<CheckCircle2 size={20} /> Device Linked!
+								</div>
+							) : (
+								<div className="bg-yellow-900/20 border border-yellow-500/50 text-yellow-500 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2">
+									<Loader2 size={18} className="animate-spin" /> Waiting
+									for Mobile...
+								</div>
+							)}
+							<p className="text-[10px] text-slate-500 mt-2">
+								Tip: Ensure your laptop is accessed via its Local Network
+								IP (e.g. 192.168.x.x) instead of localhost for the phone to
+								connect.
+							</p>
+						</div>
+
+						<button
+							onClick={startAssessment}
+							disabled={!isMobileConnected}
+							className={`w-full font-bold py-4 rounded-xl text-lg transition-all ${
+								isMobileConnected
+									? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/40"
+									: "bg-slate-800 text-slate-500 cursor-not-allowed"
+							}`}>
+							Step 2: Start Test
+						</button>
+					</div>
 				</div>
 			</div>
 		);
@@ -505,7 +599,6 @@ export default function AssessmentEnvironment() {
 	const currentMcq = assessment.mcqs[currentMcqIndex];
 	const currentDsa = assessment.dsaQuestions[0];
 
-	// --- WRAPPED IN A FRAGMENT TO BREAK FREE FROM CSS CONTEXTS ---
 	return (
 		<>
 			{/* THE MAIN TEST UI */}
@@ -566,7 +659,6 @@ export default function AssessmentEnvironment() {
 							onClick={(e) => {
 								e.preventDefault();
 								e.stopPropagation();
-								console.log("End Assessment Clicked!"); // For devtools debugging
 								setShowConfirmModal(true);
 							}}
 							disabled={isSubmitting}

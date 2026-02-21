@@ -31,7 +31,7 @@ const signup = async (req, res) => {
 		res.cookie("jwt", token, {
 			maxAge: 15 * 24 * 60 * 60 * 1000,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 
@@ -71,7 +71,7 @@ const login = async (req, res) => {
 		res.cookie("jwt", token, {
 			maxAge: 15 * 24 * 60 * 60 * 1000,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 
@@ -92,7 +92,7 @@ const logout = (req, res) => {
 		res.cookie("jwt", "", {
 			maxAge: 0,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 		res.status(200).json({ message: "Logged out successfully" });

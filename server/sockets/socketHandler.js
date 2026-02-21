@@ -124,6 +124,36 @@ const setupSocket = (io) => {
 			}
 		});
 
+		// ========================================================
+		// ZONE 2: MULTI-DEVICE PROCTORING LOGIC (NEW CODE)
+		// ========================================================
+
+		// 1. Laptop creates a secure room
+		socket.on("create_proctoring_room", (roomId) => {
+			socket.join(roomId);
+			console.log(
+				`[Proctor Socket] Laptop created/joined room: ${roomId}`,
+			);
+		});
+
+		// 2. Mobile device joins the room
+		socket.on("mobile_join_room", (roomId) => {
+			socket.join(roomId);
+			console.log(`[Proctor Socket] Mobile joined room: ${roomId}`);
+
+			// Tell the laptop that the mobile device successfully connected!
+			socket.to(roomId).emit("mobile_connected");
+		});
+
+		// 3. Mobile detects a violation and alerts the laptop
+		socket.on("mobile_violation_detected", ({ roomId, reason }) => {
+			console.log(
+				`[Proctor Socket] Mobile Violation in ${roomId}: ${reason}`,
+			);
+			// Send the strike directly to the laptop
+			socket.to(roomId).emit("trigger_laptop_strike", reason);
+		});
+
 		socket.on("disconnect", () => {
 			console.log("❌ Client Disconnected");
 			if (deepgramLive) {

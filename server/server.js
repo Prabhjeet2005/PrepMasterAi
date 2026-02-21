@@ -20,6 +20,7 @@ app.use(
 	cors({
 		origin: [
 			"http://localhost:3000",
+			"http://192.168.1.5:3000",
 			"https://prep-master-ai-client.vercel.app",
 		], // <--- Allow requests from any URL (including Vercel)
 		methods: ["GET", "POST", "PUT", "DELETE"],
@@ -45,6 +46,7 @@ const io = new Server(server, {
 	cors: {
 		origin: [
 			"http://localhost:3000",
+			"http://192.168.1.5:3000",
 			"https://prep-master-ai-client.vercel.app",
 		], // <--- Allow WebSockets from any URL
 		methods: ["GET", "POST"],
