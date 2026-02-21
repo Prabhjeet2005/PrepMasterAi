@@ -42,7 +42,6 @@ The Handshake: When the user starts the test, the laptop generates a unique sess
 The Laptop View: We use the browser's visibilitychange API to track tab switching. We use face-api.js to ensure exactly one face is looking at the screen.
 
 The Phone View: The phone goes into full-screen mode. If the user leaves the browser, the Socket sends a "Cheat Warning" to the server. We use MediaPipe Object Detection on the phone's camera feed to look for the "cell phone" class, and hand-tracking to ensure both hands are visible on the keyboard.
-# TODO: Add Same Face Check in Phone
 
 
 
@@ -55,3 +54,9 @@ Phase 2.2: Integrate the Monaco Code Editor and hook it up to a compiler API (Ju
 Phase 2.3: Build the basic Proctoring Engine (Tab switching detection and simple laptop webcam recording).
 
 Phase 2.4: The Grand Finale—Multi-device QR code pairing and AI hand/face tracking.
+
+
+
+# TODO: Exact PDF Store For Which Mock Interview Took Place
+# 1 User Attempt Assessment once
+# TODO: Add Same Face Check in Phone
