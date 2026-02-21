@@ -57,6 +57,48 @@ Phase 2.4: The Grand Finale—Multi-device QR code pairing and AI hand/face trac
 
 
 
+
+
+
+1. The Laptop (Primary Node)
+Camera: Active (Front-facing).
+
+Task 1 (Liveness): Runs lightweight Face Detection to ensure exactly 1 face is looking at the screen.
+
+Task 2 (Identity Generation): Takes a snapshot of the face, generates a Face Embedding (a 128-dimensional mathematical array representing the user's facial features), and securely sends this embedding to the WebSocket server.
+
+2. The Mobile Phone (Secondary Node)
+Positioning: Placed on a stand to the side, capturing the user's side-profile/face, their hands, the desk, and the laptop screen.
+
+Task 1 (Object Detection): Runs a lightweight object model (like COCO-SSD) to scan for the class "cell phone".
+
+Task 2 (Hand Tracking): Runs a hand model (like MediaPipe Hands) to ensure both hands are visible and accounted for.
+
+Task 3 (Identity Verification): Runs Face Recognition. It generates an embedding of the face it sees, asks the WebSocket server for the Laptop's embedding, and calculates the mathematical distance between them. If they don't match, it throws a strike!
+
+3. The WebSocket Server (The Bridge)
+Creates a secure "Room" using the Assessment ID and User ID.
+
+The laptop displays a QR code containing the URL to join this specific room.
+
+The phone scans it, joins the room, and the devices can now talk to each other in real-time. If the phone detects a violation, it tells the server, the server tells the laptop, and the laptop drops the "Red Screen of Death" on the candidate.
+
+# CHALLENGES
+1. Mobile Browser Overheating: Running Face Recognition, Hand Tracking, and Object Detection simultaneously on a mobile browser at 30 FPS will literally drain the battery in 10 minutes and throttle the phone.
+
+- Our Solution: We will use Polling (Throttling) for the ML models. The phone's camera will show 30 FPS video, but the AI will only analyze a frame every 2 seconds. This saves massive amounts of memory.
+
+2. Screen Sleep: Phones automatically turn off their screens after 30 seconds of inactivity. If the screen sleeps, the browser pauses the camera and the ML models.
+
+- Our Solution: We will use the browser's WakeLock API on the mobile page to force the screen to stay awake for the duration of the test.
+
+3. Side-Profile Recognition: Face recognition struggles if the laptop gets a straight-on view and the phone gets a 90-degree side profile.
+
+- Our Solution: The phone placement instructions must tell the user to place the phone at a ~45-degree angle so at least one eye and the nose are clearly visible to the phone's camera.
+
+
 # TODO: Exact PDF Store For Which Mock Interview Took Place
 # 1 User Attempt Assessment once
 # TODO: Add Same Face Check in Phone
+
+
