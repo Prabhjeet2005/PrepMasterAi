@@ -67,6 +67,8 @@ export default function AssessmentEnvironment() {
 	const showWarningModalRef = useRef(showWarningModal);
 	const socketRef = useRef(null); // Keep track of the socket
 
+	const laptopVideoRef = useRef(null);
+
 	useEffect(() => {
 		codeRef.current = code;
 	}, [code]);
@@ -449,6 +451,53 @@ export default function AssessmentEnvironment() {
 		return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 	};
 
+	// ==========================================
+	// START LAPTOP WEBCAM WHEN TEST STARTS
+	// ==========================================
+useEffect(() => {
+	if (hasStarted) {
+		const startLaptopCamera = async () => {
+			try {
+				if (
+					!navigator.mediaDevices ||
+					!navigator.mediaDevices.getUserMedia
+				) {
+					console.error("Camera API blocked by browser.");
+					handleViolation(
+						"Browser blocked camera. Please use secure context.",
+					);
+					return;
+				}
+
+				const stream = await navigator.mediaDevices.getUserMedia({
+					video: true,
+					audio: true,
+				});
+
+				if (laptopVideoRef.current) {
+					laptopVideoRef.current.srcObject = stream;
+					// CRITICAL FIX: Explicitly play the video
+					laptopVideoRef.current
+						.play()
+						.catch((e) => console.error("Laptop video play error:", e));
+				}
+			} catch (err) {
+				console.error("Laptop camera access denied:", err);
+				handleViolation("Laptop Camera/Mic access is mandatory.");
+			}
+		};
+		startLaptopCamera();
+	}
+
+	return () => {
+		if (laptopVideoRef.current && laptopVideoRef.current.srcObject) {
+			laptopVideoRef.current.srcObject
+				.getTracks()
+				.forEach((track) => track.stop());
+		}
+	};
+}, [hasStarted]);
+
 	if (loading || authLoading)
 		return (
 			<div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -609,6 +658,19 @@ export default function AssessmentEnvironment() {
 						{toastMessage}
 					</div>
 				)}
+
+				{/* --- FLOATING LAPTOP WEBCAM (Picture-in-Picture) --- */}
+				<div className="fixed bottom-6 right-6 z-[9999] w-48 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 pointer-events-none">
+					<video
+						ref={laptopVideoRef}
+						autoPlay
+						playsInline
+						muted // Mute it so the user doesn't hear their own echo
+						className="w-full h-full object-cover"
+						style={{ transform: "scaleX(-1)" }}
+					/>
+					<div className="absolute top-2 right-2 bg-red-600 w-2.5 h-2.5 rounded-full animate-pulse"></div>
+				</div>
 
 				{/* TOP NAVIGATION BAR */}
 				<div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-20">

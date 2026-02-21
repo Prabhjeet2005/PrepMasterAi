@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { io } from "socket.io-client";
 import {
@@ -7,20 +7,21 @@ import {
 	Smartphone,
 	ShieldAlert,
 	Loader2,
+	Camera,
 } from "lucide-react";
 
 export default function MobileProctorPage() {
 	const { roomId } = useParams();
 	const [status, setStatus] = useState("connecting"); // connecting, paired, error
+	const videoRef = useRef(null);
 
 	useEffect(() => {
-		// Initialize Socket
 		const socket = io(process.env.NEXT_PUBLIC_API_URL);
 
 		socket.on("connect", () => {
-			// Join the specific room matching the laptop
 			socket.emit("mobile_join_room", roomId);
 			setStatus("paired");
+			startCamera(); // Start camera as soon as paired
 		});
 
 		socket.on("connect_error", () => {
@@ -32,7 +33,6 @@ export default function MobileProctorPage() {
 			try {
 				if ("wakeLock" in navigator) {
 					await navigator.wakeLock.request("screen");
-					console.log("Screen Wake Lock active.");
 				}
 			} catch (err) {
 				console.error("Wake Lock failed:", err);
@@ -42,8 +42,49 @@ export default function MobileProctorPage() {
 
 		return () => {
 			socket.disconnect();
+			// Turn off camera when leaving
+			if (videoRef.current && videoRef.current.srcObject) {
+				videoRef.current.srcObject
+					.getTracks()
+					.forEach((track) => track.stop());
+			}
 		};
 	}, [roomId]);
+
+	// --- HARDWARE ACCESS ---
+	const startCamera = async () => {
+		try {
+			if (
+				!navigator.mediaDevices ||
+				!navigator.mediaDevices.getUserMedia
+			) {
+				setStatus("error");
+				alert(
+					"Camera API blocked. Please use Chrome with the security flag enabled.",
+				);
+				return;
+			}
+
+			const stream = await navigator.mediaDevices.getUserMedia({
+				video: { facingMode: "user" },
+				audio: false,
+			});
+
+			if (videoRef.current) {
+				videoRef.current.srcObject = stream;
+				// CRITICAL FIX: Explicitly tell the video element to play the stream
+				videoRef.current
+					.play()
+					.catch((e) => console.error("Video play error:", e));
+			}
+		} catch (err) {
+			console.error("Camera access denied:", err);
+			setStatus("error");
+			alert(
+				"Camera access was denied. Please check your browser permissions and refresh.",
+			);
+		}
+	};
 
 	return (
 		<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
@@ -60,29 +101,38 @@ export default function MobileProctorPage() {
 			)}
 
 			{status === "paired" && (
-				<div className="flex flex-col items-center">
-					<div className="w-24 h-24 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center mb-6 border border-green-500/50">
-						<CheckCircle2 size={48} />
+				<div className="flex flex-col items-center w-full max-w-md h-full">
+					<div className="flex items-center gap-2 text-green-400 bg-green-900/30 px-4 py-2 rounded-full font-bold mb-6 mt-4">
+						<CheckCircle2 size={20} /> Securely Linked to Assessment
 					</div>
-					<h1 className="text-3xl font-black mb-2 text-white">
-						Device Paired!
-					</h1>
-					<p className="text-slate-300 mb-8 max-w-xs">
-						Your mobile camera is now securely linked to your assessment.
-					</p>
 
-					<div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-sm text-left shadow-xl">
-						<h3 className="font-bold text-blue-400 mb-4 flex items-center gap-2">
-							<Smartphone size={20} /> Placement Instructions
+					{/* LIVE CAMERA FEED */}
+					<div className="relative w-full aspect-[3/4] bg-black rounded-3xl overflow-hidden border-4 border-slate-800 shadow-2xl mb-8">
+						<video
+							ref={videoRef}
+							autoPlay
+							playsInline
+							muted
+							className="absolute inset-0 w-full h-full object-cover mirror"
+							style={{ transform: "scaleX(-1)" }} // Mirrors the video so it feels natural
+						/>
+						<div className="absolute top-4 left-4 bg-black/50 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2 text-xs font-bold border border-white/10">
+							<div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+							PROCTORING ACTIVE
+						</div>
+					</div>
+
+					<div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full text-left shadow-xl">
+						<h3 className="font-bold text-blue-400 mb-3 flex items-center gap-2">
+							<Camera size={20} /> Positioning Rules
 						</h3>
-						<ul className="text-sm text-slate-300 space-y-3 list-disc list-inside">
-							<li>Place phone on a stand to your side.</li>
+						<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
+							<li>Prop your phone up on your desk.</li>
 							<li>
-								Ensure your <b>face, hands, and screen</b> are visible.
+								Ensure your <b>face, hands, and laptop screen</b> are
+								clearly visible.
 							</li>
-							<li>
-								<strong>Do not lock your phone</strong> or close this tab.
-							</li>
+							<li>Do not lock your phone screen.</li>
 						</ul>
 					</div>
 				</div>
