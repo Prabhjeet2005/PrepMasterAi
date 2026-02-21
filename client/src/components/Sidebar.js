@@ -17,6 +17,7 @@ import {
 	Video,
 	PlusCircle,
   Speech,
+  FileEdit
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -62,6 +63,14 @@ export default function Sidebar() {
 		{ name: "Ai Interview", href: "/new-interview", icon: Speech },
 		{ name: "OA & Coding", href: "/assessments", icon: Code2 },
 	];
+
+  if (authUser?.role === "recruiter" || authUser?.role === "admin") {
+		navLinks.push({
+			name: "Create OA",
+			href: "/recruiter/create-oa",
+			icon: FileEdit,
+		});
+	}
 
 	return (
 		<>
@@ -170,6 +179,9 @@ export default function Sidebar() {
 									className={`flex flex-col overflow-hidden transition-opacity duration-300 ${isCollapsed ? "md:opacity-0 md:hidden" : "opacity-100"}`}>
 									<span className="text-sm font-bold text-white truncate">
 										{authUser.name}
+									</span>
+									<span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+										{authUser.role || "user"}
 									</span>
 								</div>
 							</div>

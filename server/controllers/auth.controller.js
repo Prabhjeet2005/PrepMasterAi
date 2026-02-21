@@ -39,6 +39,7 @@ const signup = async (req, res) => {
 			_id: newUser._id,
 			name: newUser.name,
 			email: newUser.email,
+			role: "user",
 		});
 	} catch (error) {
 		console.error("Signup Error:", error.message);
@@ -78,6 +79,7 @@ const login = async (req, res) => {
 			_id: user._id,
 			name: user.name,
 			email: user.email,
+			role: user.role,
 		});
 	} catch (error) {
 		console.error("Login Error:", error.message);
