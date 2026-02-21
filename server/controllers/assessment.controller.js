@@ -1,4 +1,5 @@
 const Assessment = require("../models/assessment.model.js");
+const axios = require("axios");
 
 // 1. Create a new Assessment (Admin/Recruiter)
 const createAssessment = async (req, res) => {
@@ -72,4 +73,82 @@ const getAssessmentById = async (req, res) => {
 	}
 };
 
-module.exports = { createAssessment, getAllAssessments, getAssessmentById };
+const executeCode = async (req, res) => {
+	try {
+		const { code, language, testCases } = req.body;
+
+		// Wandbox specific compiler environments
+		const languageMap = {
+			javascript: "nodejs-head",
+			python: "cpython-head",
+			cpp: "gcc-head",
+			java: "openjdk-head",
+		};
+
+		if (!languageMap[language]) {
+			return res.status(400).json({ error: "Unsupported language" });
+		}
+
+		const results = [];
+
+		// Run the code against each test case
+		for (const tc of testCases) {
+			// Send request to Wandbox API
+			const response = await axios.post(
+				"https://wandbox.org/api/compile.json",
+				{
+					compiler: languageMap[language],
+					code: code,
+					stdin: tc.input, // Standard input for the test case
+				},
+			);
+
+			const data = response.data;
+
+			console.log(`WANDBOX RAW RESPONSE for ${language}:`, data);
+
+			// Extract output safely (checking all possible Wandbox fields)
+			const output = (
+				data.program_out ||
+				data.program_message ||
+				data.stdout ||
+				""
+			).trim();
+			const compileError = (
+				data.compiler_error ||
+				data.compiler_message ||
+				""
+			).trim();
+			const runtimeError = (data.program_err || data.stderr || "").trim();
+
+			// Wandbox status "0" means success. Anything else is a compile or runtime failure.
+			const isError = data.status !== "0" || runtimeError !== "";
+			const errorStr =
+				compileError ||
+				runtimeError ||
+				"Unknown Compilation/Runtime Error";
+
+			// If there's an error, show the error. Otherwise, show the output.
+			const finalOutput = isError ? errorStr : output;
+			const isPassed =
+				!isError && finalOutput === tc.expectedOutput.trim();
+
+			results.push({
+				input: tc.input,
+				expectedOutput: tc.expectedOutput,
+				actualOutput: finalOutput || "No output generated",
+				passed: isPassed,
+				hasError: isError,
+			});
+		}
+		
+		res.status(200).json({ results });
+	} catch (error) {
+		console.error("Wandbox Execution Error:", error.message);
+		res
+			.status(500)
+			.json({ error: "Failed to execute code on remote server" });
+	}
+};
+
+module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode };

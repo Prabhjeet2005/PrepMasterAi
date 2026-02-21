@@ -19,6 +19,7 @@ const testCaseSchema = new mongoose.Schema({
 const dsaSchema = new mongoose.Schema({
 	title: { type: String, required: true },
 	problemStatement: { type: String, required: true },
+	inputFormat: { type: String, required: true },
 	constraints: { type: String }, // e.g., "1 <= N <= 10^5"
 	difficulty: {
 		type: String,
