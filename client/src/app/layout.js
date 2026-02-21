@@ -1,7 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthContextProvider } from "@/context/AuthContext";
-import Navbar from "@/components/Navbar";
+import Sidebar from "@/components/Sidebar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,9 +24,15 @@ export default function RootLayout({ children }) {
 			<body
 				className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
 				<AuthContextProvider>
-					<Navbar />
+					{/* Flex container to place Sidebar and Main Content side-by-side */}
+					<div className="flex flex-col md:flex-row h-[100dvh] overflow-hidden bg-slate-950">
+						<Sidebar />
 
-					<main className="min-h-screen bg-slate-950">{children}</main>
+						{/* Main content area takes remaining space and handles its own scrolling */}
+						<main className="flex-1 overflow-y-auto relative bg-slate-950">
+							{children}
+						</main>
+					</div>
 				</AuthContextProvider>
 			</body>
 		</html>
