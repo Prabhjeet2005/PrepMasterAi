@@ -26,6 +26,7 @@ import {
 	Lock,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import * as faceapi from "@vladmandic/face-api";
 
 const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
 
@@ -55,7 +56,7 @@ export default function AssessmentEnvironment() {
 	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [violationMessage, setViolationMessage] = useState("");
 	const [warningCountdown, setWarningCountdown] = useState(60);
-	const MAX_WARNINGS = 3;
+	const MAX_WARNINGS = 300;
 
 	const [isMobileConnected, setIsMobileConnected] = useState(false);
 	const [pairingUrl, setPairingUrl] = useState("");
@@ -75,6 +76,9 @@ export default function AssessmentEnvironment() {
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
 	const warningsRef = useRef(0);
+
+	const faceDetectionIntervalRef = useRef(null);
+	const lookAwayTimerRef = useRef(0);
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -268,6 +272,74 @@ export default function AssessmentEnvironment() {
 
 		return () => clearInterval(preTestPoller);
 	}, [setupStep, isMobileConnected, hasStarted]);
+
+	// ==========================================
+	// AI VISION ENGINE: LAPTOP FACE TRACKING
+	// ==========================================
+	useEffect(() => {
+		// Only run when the assessment is active and the laptop video is physically playing
+		if (!hasStarted || !laptopStream || !laptopVideoRef.current) return;
+
+		const loadAiModels = async () => {
+			try {
+				// Load the lightweight Face Detector model from a fast CDN (Zero Server Cost)
+				const MODEL_URL =
+					"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+				await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+				console.log("✅ Local Browser AI Vision Loaded");
+				startFaceTracking();
+			} catch (err) {
+				console.error("AI Model Load Error:", err);
+			}
+		};
+
+		const startFaceTracking = () => {
+			const video = laptopVideoRef.current;
+
+			// Scan the video feed every 1.5 seconds (Saves CPU, prevents lag)
+			faceDetectionIntervalRef.current = setInterval(async () => {
+				// Halt scanning if they are on the warning screen or submitting
+				if (showWarningModalRef.current || isSubmittingRef.current) return;
+				if (!video || video.paused || video.ended) return;
+
+				const detections = await faceapi.detectAllFaces(
+					video,
+					new faceapi.TinyFaceDetectorOptions({
+						inputSize: 224,
+						scoreThreshold: 0.5,
+					}),
+				);
+
+				const faceCount = detections.length;
+
+				if (faceCount === 0) {
+					lookAwayTimerRef.current += 1;
+					// 3 consecutive missed scans (1.5s * 3 = 7.5 seconds of missing/looking away)
+					if (lookAwayTimerRef.current >= 5) {
+						handleViolation(
+							"Candidate's Face is not in the Frame",
+						);
+						lookAwayTimerRef.current = 0;
+					}
+				} else if (faceCount > 1) {
+					handleViolation(
+						"Multiple faces detected! Unauthorized assistance suspected.",
+					);
+					lookAwayTimerRef.current = 0;
+				} else {
+					// Exactly 1 face is present, reset the looking away timer
+					lookAwayTimerRef.current = 0;
+				}
+			}, 1500);
+		};
+
+		loadAiModels();
+
+		return () => {
+			if (faceDetectionIntervalRef.current)
+				clearInterval(faceDetectionIntervalRef.current);
+		};
+	}, [hasStarted, laptopStream]);
 
 	// ==========================================
 	// BULLETPROOF PROCTORING ENGINE
@@ -503,7 +575,9 @@ export default function AssessmentEnvironment() {
 		) {
 			try {
 				await exitFullscreen();
-			} catch (e) {toast.error("Browser Blocked Fullscreen")}
+			} catch (e) {
+				toast.error("Browser Blocked Fullscreen");
+			}
 		}
 
 		enterFullscreenAndExecute(
@@ -514,7 +588,6 @@ export default function AssessmentEnvironment() {
 			},
 			(err) => {
 				toast.error("Some Error Occured");
-				
 			},
 		);
 	};
@@ -924,11 +997,8 @@ export default function AssessmentEnvironment() {
 							className="group relative w-fit flex justify-center py-5 px-8 border-2 border-blue-400 text-xl font-black rounded-2xl text-white bg-gradient-to-r from-blue-700 to-blue-500 hover:from-blue-600 hover:to-blue-400 focus:outline-none shadow-[0_0_40px_rgba(37,99,235,0.6)] transform transition-all hover:scale-105 active:scale-95 overflow-hidden">
 							<div className="absolute inset-0 w-full h-full bg-white/10 group-hover:bg-transparent transition-colors"></div>
 							<span className="flex items-center p-3 gap-3 relative z-10">
-								<ShieldCheck
-									size={28}
-									className=" text-blue-200"
-								/>
-								I Understand, Return to Test
+								<ShieldCheck size={28} className=" text-blue-200" />I
+								Understand, Return to Test
 							</span>
 						</button>
 						<p className="text-slate-500 text-sm mt-4">
