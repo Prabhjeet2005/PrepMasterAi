@@ -63,18 +63,18 @@ Phase 2.4: The Grand Finale—Multi-device QR code pairing and AI hand/face trac
 1. The Laptop (Primary Node)
 Camera: Active (Front-facing).
 
-Task 1 (Liveness): Runs lightweight Face Detection to ensure exactly 1 face is looking at the screen.
+1. Laptop Camera: 
 
-Task 2 (Identity Generation): Takes a snapshot of the face, generates a Face Embedding (a 128-dimensional mathematical array representing the user's facial features), and securely sends this embedding to the WebSocket server.
+a. Face Detection to check only 1 face in frame + Earphone/Headphone Detection + Look Away from camera for long time
+b. Face Recognition to cross check Mobile Device Camera and Laptop Camera Capturing the same person otherwise someone else can use mobile at someother place while test give cheats
 
-2. The Mobile Phone (Secondary Node)
-Positioning: Placed on a stand to the side, capturing the user's side-profile/face, their hands, the desk, and the laptop screen.
 
-Task 1 (Object Detection): Runs a lightweight object model (like COCO-SSD) to scan for the class "cell phone".
 
-Task 2 (Hand Tracking): Runs a hand model (like MediaPipe Hands) to ensure both hands are visible and accounted for.
+2. Mobile Camera
 
-Task 3 (Identity Verification): Runs Face Recognition. It generates an embedding of the face it sees, asks the WebSocket server for the Laptop's embedding, and calculates the mathematical distance between them. If they don't match, it throws a strike!
+a. Same Face Recognition as of Laptop Camera
+b. Both Hands Present in frame
+c. Mobile Detection
 
 3. The WebSocket Server (The Bridge)
 Creates a secure "Room" using the Assessment ID and User ID.
