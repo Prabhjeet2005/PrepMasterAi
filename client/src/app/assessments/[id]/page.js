@@ -4,8 +4,8 @@ import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthContext } from "@/context/AuthContext";
 import Editor from "@monaco-editor/react";
-import { QRCodeSVG } from "qrcode.react"; // NEW IMPORT
-import { io } from "socket.io-client"; // NEW IMPORT
+import { QRCodeSVG } from "qrcode.react";
+import { io } from "socket.io-client";
 import {
 	Loader2,
 	Clock,
@@ -19,8 +19,9 @@ import {
 	Code2,
 	GripVertical,
 	AlertTriangle,
-	Smartphone, // Added Smartphone icon
+	Smartphone,
 	CheckCircle2,
+	Camera,
 } from "lucide-react";
 
 const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
@@ -37,13 +38,11 @@ export default function AssessmentEnvironment() {
 	const [activeTab, setActiveTab] = useState("mcq");
 	const [currentMcqIndex, setCurrentMcqIndex] = useState(0);
 	const [mcqAnswers, setMcqAnswers] = useState({});
-
 	const [code, setCode] = useState(CPP_BOILERPLATE);
 	const [isCompiling, setIsCompiling] = useState(false);
 	const [executionResults, setExecutionResults] = useState(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
-	// --- PROCTORING & CUSTOM UI STATES ---
 	const [hasStarted, setHasStarted] = useState(false);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [warnings, setWarnings] = useState(0);
@@ -51,15 +50,14 @@ export default function AssessmentEnvironment() {
 	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [violationMessage, setViolationMessage] = useState("");
 	const [toastMessage, setToastMessage] = useState("");
+	const [warningCountdown, setWarningCountdown] = useState(60);
 	const MAX_WARNINGS = 3;
 
-	// --- NEW: MULTI-DEVICE STATES ---
 	const [isMobileConnected, setIsMobileConnected] = useState(false);
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [isMobileDevice, setIsMobileDevice] = useState(false);
 	const [laptopStream, setLaptopStream] = useState(null);
 
-	// --- REFS ---
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -67,10 +65,11 @@ export default function AssessmentEnvironment() {
 	const lastViolationTime = useRef(0);
 	const isSubmittingRef = useRef(isSubmitting);
 	const showWarningModalRef = useRef(showWarningModal);
-	const socketRef = useRef(null); // Keep track of the socket
+	const socketRef = useRef(null);
 
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
+	const warningsRef = useRef(0);
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -89,7 +88,6 @@ export default function AssessmentEnvironment() {
 	}, [showWarningModal]);
 
 	useEffect(() => {
-		// Detect if the user is on a phone/tablet
 		const checkMobile =
 			/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
 				navigator.userAgent,
@@ -102,10 +100,8 @@ export default function AssessmentEnvironment() {
 	const [isDragging, setIsDragging] = useState(false);
 	const splitContainerRef = useRef(null);
 
-	// Fetch Assessment
 	useEffect(() => {
 		if (!authLoading && !authUser) return router.push("/login");
-
 		const fetchAssessment = async () => {
 			try {
 				const res = await axios.get(
@@ -115,66 +111,82 @@ export default function AssessmentEnvironment() {
 				setAssessment(res.data);
 				setTimeLeft(res.data.durationMinutes * 60);
 			} catch (err) {
-				console.error(err);
 				router.push("/assessments");
 			} finally {
 				setLoading(false);
 			}
 		};
-
 		if (id) fetchAssessment();
 	}, [id, authUser, authLoading, router]);
 
-	// ==========================================
-	// NEW: SOCKET INITIALIZATION & PAIRING
-	// ==========================================
+	// SOCKET PAIRING
 	useEffect(() => {
 		if (!authUser || !id) return;
-
-		// Generate the unique room ID for this test session
 		const roomId = `${id}-${authUser._id}`;
-
-		// Generate the URL the phone will scan (Works on local Wi-Fi if using local IP)
 		if (typeof window !== "undefined") {
 			setPairingUrl(
 				`${window.location.protocol}//${window.location.host}/mobile-proctor/${roomId}`,
 			);
 		}
-
-		// Connect to Socket
 		const socket = io(process.env.NEXT_PUBLIC_API_URL);
 		socketRef.current = socket;
 
 		socket.on("connect", () => {
-			console.log("Laptop connected to socket. Creating room...");
 			socket.emit("create_proctoring_room", roomId);
 		});
-
 		socket.on("mobile_connected", () => {
-			console.log("Mobile device paired successfully!");
 			setIsMobileConnected(true);
 		});
-
 		socket.on("mobile_disconnected", () => {
-			console.log("Mobile device disconnected!");
 			setIsMobileConnected(false);
-			if (hasStartedRef.current) {
+			if (hasStartedRef.current)
 				handleViolation(
 					"Mobile camera disconnected! Test environment compromised.",
 				);
-			}
 		});
-
-		// Listen for Strikes triggered by the Phone Camera
 		socket.on("trigger_laptop_strike", (reason) => {
-			// Re-use our existing bulletproof violation handler!
 			handleViolation(`Mobile Proctor Alert: ${reason}`);
 		});
 
 		return () => socket.disconnect();
 	}, [authUser, id]);
 
-	// Timer
+	// START LAPTOP CAMERA IMMEDIATELY ON LOAD
+	useEffect(() => {
+		if (isMobileDevice) return;
+		const startLaptopCamera = async () => {
+			try {
+				const stream = await navigator.mediaDevices.getUserMedia({
+					video: true,
+					audio: true,
+				});
+				laptopStreamRef.current = stream;
+				setLaptopStream(stream);
+			} catch (err) {
+				handleViolation("Laptop Camera/Mic access is mandatory.");
+			}
+		};
+		startLaptopCamera();
+
+		return () => {
+			if (laptopStreamRef.current)
+				laptopStreamRef.current
+					.getTracks()
+					.forEach((track) => track.stop());
+		};
+	}, [isMobileDevice]);
+
+	// BIND VIDEO
+	useEffect(() => {
+		if (laptopVideoRef.current && laptopStream) {
+			laptopVideoRef.current.srcObject = laptopStream;
+			laptopVideoRef.current
+				.play()
+				.catch((e) => console.error("Laptop Play Error:", e));
+		}
+	}, [laptopStream, hasStarted]);
+
+	// TEST DURATION TIMER
 	useEffect(() => {
 		if (timeLeft <= 0 || loading || !hasStarted || showWarningModal)
 			return;
@@ -191,7 +203,23 @@ export default function AssessmentEnvironment() {
 		return () => clearInterval(timer);
 	}, [timeLeft, loading, hasStarted, showWarningModal]);
 
-	// Drag Resizer
+	// 60-SECOND IDLE WARNING TIMER
+	useEffect(() => {
+		if (!showWarningModal || isSubmitting || warnings >= MAX_WARNINGS)
+			return;
+		const idleTimer = setInterval(() => {
+			setWarningCountdown((prev) => {
+				if (prev <= 1) {
+					clearInterval(idleTimer);
+					submitAssessment(true);
+					return 0;
+				}
+				return prev - 1;
+			});
+		}, 1000);
+		return () => clearInterval(idleTimer);
+	}, [showWarningModal, isSubmitting, warnings]);
+
 	useEffect(() => {
 		const handleMouseMove = (e) => {
 			if (!isDragging || !splitContainerRef.current) return;
@@ -203,7 +231,6 @@ export default function AssessmentEnvironment() {
 				setLeftPanelWidth(newLeftWidth);
 		};
 		const handleMouseUp = () => setIsDragging(false);
-
 		if (isDragging) {
 			document.addEventListener("mousemove", handleMouseMove);
 			document.addEventListener("mouseup", handleMouseUp);
@@ -215,19 +242,20 @@ export default function AssessmentEnvironment() {
 	}, [isDragging]);
 
 	// ==========================================
-	// BULLETPROOF ANTI-CHEAT ENGINE (With 10s Poller)
+	// BULLETPROOF PROCTORING ENGINE
 	// ==========================================
-	const checkIsFullscreen = () => !!document.fullscreenElement;
-
-	const requestFullscreen = async () => {
-		const docElm = document.documentElement;
-		if (docElm.requestFullscreen) await docElm.requestFullscreen();
-		else if (docElm.webkitRequestFullscreen)
-			await docElm.webkitRequestFullscreen();
-		else if (docElm.mozRequestFullScreen)
-			await docElm.mozRequestFullScreen();
-		else if (docElm.msRequestFullscreen)
-			await docElm.msRequestFullscreen();
+	const checkIsFullscreen = () => {
+		if (typeof window === "undefined") return false;
+		const isDOMFullscreen = !!(
+			document.fullscreenElement ||
+			document.webkitFullscreenElement ||
+			document.mozFullScreenElement ||
+			document.msFullscreenElement
+		);
+		// Increased margin to 15px to account for strict OS rounding and safe areas
+		const isPhysicallyFullscreen =
+			window.innerHeight >= window.screen.height - 15;
+		return isDOMFullscreen && isPhysicallyFullscreen;
 	};
 
 	const exitFullscreen = async () => {
@@ -240,164 +268,10 @@ export default function AssessmentEnvironment() {
 			await document.webkitExitFullscreen();
 	};
 
-	// Note: We define this function up here so the Socket listener can use it too!
-	const handleViolation = (reason) => {
-		if (isSubmittingRef.current) return;
-
-		const now = Date.now();
-		if (now - lastViolationTime.current < 2000) return;
-		lastViolationTime.current = now;
-
-		setWarnings((prev) => {
-			const newWarnings = prev + 1;
-			setViolationMessage(
-				newWarnings >= MAX_WARNINGS
-					? `🚨 ${reason}. You reached 3 strikes.`
-					: reason,
-			);
-			setShowWarningModal(true);
-			if (newWarnings >= MAX_WARNINGS) {
-				submitAssessment(true); // Force auto-submit
-			}
-			return newWarnings;
-		});
-	};
-
-	useEffect(() => {
-		if (!hasStarted) return;
-
-		const monitorFs = () => {
-			const current = checkIsFullscreen();
-			if (isFullscreenRef.current !== current) {
-				isFullscreenRef.current = current;
-				setIsFullscreen(current);
-				if (
-					!current &&
-					hasStartedRef.current &&
-					!showWarningModalRef.current
-				) {
-					handleViolation(
-						"Exiting Fullscreen mode is strictly prohibited",
-					);
-				}
-			}
-		};
-
-		const handleVisibilityChange = () => {
-			if (document.hidden && hasStartedRef.current)
-				handleViolation("Switching tabs is strictly prohibited");
-		};
-
-		const handleBlur = () => {
-			if (hasStartedRef.current && !showWarningModalRef.current) {
-				if (!document.hasFocus()) {
-					handleViolation(
-						"Leaving the assessment window (Virtual Desktops/App switching) is prohibited",
-					);
-				}
-			}
-		};
-
-		const preventCopyPaste = (e) => {
-			if (hasStartedRef.current && !showWarningModalRef.current) {
-				e.preventDefault();
-				e.stopPropagation();
-				setToastMessage("⚠️ Copying and Pasting is strictly disabled.");
-				setTimeout(() => setToastMessage(""), 3000);
-			}
-		};
-
-		const securityPoller = setInterval(() => {
-			if (
-				hasStartedRef.current &&
-				!showWarningModalRef.current &&
-				!isSubmittingRef.current
-			) {
-				const current = checkIsFullscreen();
-				if (!current) {
-					handleViolation(
-						"Exited Fullscreen mode (Detected by Security Poller)",
-					);
-					isFullscreenRef.current = false;
-					setIsFullscreen(false);
-				}
-			}
-		}, 10000);
-
-		document.addEventListener("fullscreenchange", monitorFs);
-		document.addEventListener("webkitfullscreenchange", monitorFs);
-		document.addEventListener("mozfullscreenchange", monitorFs);
-		document.addEventListener("visibilitychange", handleVisibilityChange);
-		window.addEventListener("blur", handleBlur);
-		window.addEventListener("copy", preventCopyPaste, { capture: true });
-		window.addEventListener("paste", preventCopyPaste, { capture: true });
-		window.addEventListener("contextmenu", preventCopyPaste, {
-			capture: true,
-		});
-
-		return () => {
-			clearInterval(securityPoller);
-			document.removeEventListener("fullscreenchange", monitorFs);
-			document.removeEventListener("webkitfullscreenchange", monitorFs);
-			document.removeEventListener("mozfullscreenchange", monitorFs);
-			document.removeEventListener(
-				"visibilitychange",
-				handleVisibilityChange,
-			);
-			window.removeEventListener("blur", handleBlur);
-			window.removeEventListener("copy", preventCopyPaste, {
-				capture: true,
-			});
-			window.removeEventListener("paste", preventCopyPaste, {
-				capture: true,
-			});
-			window.removeEventListener("contextmenu", preventCopyPaste, {
-				capture: true,
-			});
-		};
-	}, [hasStarted]);
-
-	// --- ENFORCED GATEWAY LOGIC ---
-	const startAssessment = async () => {
-		try {
-			await requestFullscreen();
-			setTimeout(() => {
-				if (checkIsFullscreen()) {
-					setHasStarted(true);
-					setIsFullscreen(true);
-					isFullscreenRef.current = true;
-				} else {
-					alert(
-						"Fullscreen is required to start the assessment. Please click allow.",
-					);
-				}
-			}, 300);
-		} catch (err) {
-			alert("You must allow fullscreen to take this assessment.");
-		}
-	};
-
-const handleAcknowledgeWarning = async () => {
-	try {
-		if (!checkIsFullscreen()) {
-			await requestFullscreen();
-		}
-		setShowWarningModal(false);
-		setViolationMessage("");
-		setIsFullscreen(true);
-		isFullscreenRef.current = true;
-	} catch (e) {
-		setToastMessage(
-			"Browser blocked request. Click anywhere on the background, then click 'I Understand'.",
-		);
-		console.error("Fullscreen error:", e);
-	}
-};
-
 	const submitAssessment = async (isAutoSubmit = false) => {
 		if (isSubmittingRef.current) return;
-
 		isSubmittingRef.current = true;
+		setTimeLeft(0)
 		setIsSubmitting(true);
 		setShowConfirmModal(false);
 
@@ -406,7 +280,6 @@ const handleAcknowledgeWarning = async () => {
 			const finalAnswers = isAutoSubmit
 				? mcqAnswersRef.current
 				: mcqAnswers;
-
 			const res = await axios.post(
 				`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}/submit`,
 				{ mcqAnswers: finalAnswers, code: finalCode, language: "cpp" },
@@ -414,12 +287,10 @@ const handleAcknowledgeWarning = async () => {
 			);
 
 			if (res) setHasStarted(false);
-
 			setToastMessage(
 				`✅ Assessment Submitted! Your score is: ${res.data.totalScore.toFixed(2)}`,
 			);
 
-			// --- BUG 3 FIX: Tell Mobile to close session ---
 			if (socketRef.current) {
 				const roomId = `${id}-${authUser._id}`;
 				socketRef.current.emit("end_proctoring_session", roomId);
@@ -436,7 +307,6 @@ const handleAcknowledgeWarning = async () => {
 				router.push("/assessments");
 			}, 2000);
 		} catch (error) {
-			console.error("Submission failed:", error);
 			if (!isAutoSubmit) {
 				setToastMessage(
 					"❌ Failed to submit assessment. Please try again.",
@@ -446,6 +316,214 @@ const handleAcknowledgeWarning = async () => {
 			setIsSubmitting(false);
 			isSubmittingRef.current = false;
 		}
+	};
+
+	const handleViolation = (reason) => {
+		if (isSubmittingRef.current) return;
+		const now = Date.now();
+		if (now - lastViolationTime.current < 2000) return;
+		lastViolationTime.current = now;
+
+		warningsRef.current += 1;
+		const currentWarnings = warningsRef.current;
+
+		setWarnings(currentWarnings);
+		setWarningCountdown(60); // Reset the 60s auto-submit timer
+		setViolationMessage(
+			currentWarnings >= MAX_WARNINGS
+				? `🚨 ${reason}. You reached 3 strikes.`
+				: reason,
+		);
+		setShowWarningModal(true);
+
+		if (currentWarnings >= MAX_WARNINGS) {
+			submitAssessment(true);
+		}
+	};
+
+	useEffect(() => {
+		if (!hasStarted) return;
+
+		const verifySecureEnvironment = () => {
+			if (
+				showWarningModalRef.current ||
+				isSubmittingRef.current ||
+				!hasStartedRef.current
+			)
+				return;
+
+			if (!checkIsFullscreen()) {
+				isFullscreenRef.current = false;
+				setIsFullscreen(false);
+				handleViolation("Exited Fullscreen mode");
+			}
+		};
+
+		const onResize = () => setTimeout(verifySecureEnvironment, 200);
+
+		const onVisibilityChange = () => {
+			if (
+				document.hidden &&
+				hasStartedRef.current &&
+				!showWarningModalRef.current
+			) {
+				handleViolation(
+					"Switching tabs or minimizing is strictly prohibited",
+				);
+			}
+		};
+
+		const onBlur = () => {
+			if (
+				!document.hasFocus() &&
+				hasStartedRef.current &&
+				!showWarningModalRef.current
+			) {
+				handleViolation("Leaving the assessment window is prohibited");
+			}
+		};
+
+		const onCopyPaste = (e) => {
+			if (hasStartedRef.current && !showWarningModalRef.current) {
+				e.preventDefault();
+				e.stopPropagation();
+				setToastMessage("⚠️ Copying and Pasting is strictly disabled.");
+				setTimeout(() => setToastMessage(""), 3000);
+			}
+		};
+
+		const poller = setInterval(verifySecureEnvironment, 1000);
+
+		window.addEventListener("resize", onResize);
+		document.addEventListener("fullscreenchange", verifySecureEnvironment);
+		document.addEventListener(
+			"webkitfullscreenchange",
+			verifySecureEnvironment,
+		);
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		window.addEventListener("blur", onBlur);
+		window.addEventListener("copy", onCopyPaste, { capture: true });
+		window.addEventListener("paste", onCopyPaste, { capture: true });
+		window.addEventListener("contextmenu", onCopyPaste, { capture: true });
+
+		return () => {
+			clearInterval(poller);
+			window.removeEventListener("resize", onResize);
+			document.removeEventListener(
+				"fullscreenchange",
+				verifySecureEnvironment,
+			);
+			document.removeEventListener(
+				"webkitfullscreenchange",
+				verifySecureEnvironment,
+			);
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+			window.removeEventListener("blur", onBlur);
+			window.removeEventListener("copy", onCopyPaste, { capture: true });
+			window.removeEventListener("paste", onCopyPaste, { capture: true });
+			window.removeEventListener("contextmenu", onCopyPaste, {
+				capture: true,
+			});
+		};
+	}, [hasStarted]);
+
+	// ==========================================
+	// THE FIX: SMART RETRY FULLSCREEN ENGINE
+	// ==========================================
+	const enterFullscreenAndExecute = (onSuccess, onFail) => {
+		const docElm = document.documentElement;
+		let fsPromise;
+
+		if (docElm.requestFullscreen) fsPromise = docElm.requestFullscreen();
+		else if (docElm.webkitRequestFullscreen)
+			fsPromise = docElm.webkitRequestFullscreen();
+		else if (docElm.mozRequestFullScreen)
+			fsPromise = docElm.mozRequestFullScreen();
+		else if (docElm.msRequestFullscreen)
+			fsPromise = docElm.msRequestFullscreen();
+
+		if (fsPromise !== undefined) {
+			fsPromise
+				.then(() => {
+					let attempts = 0;
+					const verifyLoop = setInterval(() => {
+						attempts++;
+						if (checkIsFullscreen()) {
+							clearInterval(verifyLoop);
+							onSuccess();
+						} else if (attempts >= 15) {
+							clearInterval(verifyLoop);
+							// STRICT FALLBACK: We no longer accept fake DOM fullscreen.
+							// It MUST pass the physical check, otherwise we fail to prevent infinite strikes.
+							if (checkIsFullscreen()) {
+								onSuccess();
+							} else {
+								onFail("Fullscreen animation failed. Please click again.");
+							}
+						}
+					}, 100);
+				})
+				.catch(() => {
+					onFail(
+						"Browser blocked fullscreen. Please click 'Allow' or click anywhere on screen first.",
+					);
+				});
+		} else {
+			setTimeout(() => {
+				if (checkIsFullscreen()) onSuccess();
+				else onFail("Fullscreen not supported or denied.");
+			}, 1000);
+		}
+	};
+
+	const startAssessment = async () => {
+		// CLEAR BUGGED STATE: If browser thinks it's fullscreen but physically isn't
+		if (
+			document.fullscreenElement &&
+			window.innerHeight < window.screen.height - 15
+		) {
+			try {
+				await exitFullscreen();
+			} catch (e) {}
+		}
+
+		enterFullscreenAndExecute(
+			() => {
+				setHasStarted(true);
+				setIsFullscreen(true);
+				isFullscreenRef.current = true;
+			},
+			(err) => {
+				setToastMessage(err);
+				setTimeout(() => setToastMessage(""), 3000);
+			},
+		);
+	};
+
+	const handleAcknowledgeWarning = async () => {
+		// CLEAR BUGGED STATE: This is why tab switching fixed it.
+		// We manually clear the corrupted state here to force the OS to trigger the animation.
+		if (
+			document.fullscreenElement &&
+			window.innerHeight < window.screen.height - 15
+		) {
+			try {
+				await exitFullscreen();
+			} catch (e) {}
+		}
+
+		enterFullscreenAndExecute(
+			() => {
+				setViolationMessage("");
+				setIsFullscreen(true);
+				isFullscreenRef.current = true;
+				setShowWarningModal(false);
+			},
+			(err) => {
+				setToastMessage(err);
+				setTimeout(() => setToastMessage(""), 3000);
+			},
+		);
 	};
 
 	const handleMcqSelect = (optionIndex) => {
@@ -463,7 +541,6 @@ const handleAcknowledgeWarning = async () => {
 			);
 			setExecutionResults(res.data.results);
 		} catch (error) {
-			console.error("Compilation error:", error);
 			setExecutionResults([
 				{
 					hasError: true,
@@ -480,40 +557,6 @@ const handleAcknowledgeWarning = async () => {
 		const s = seconds % 60;
 		return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 	};
-
-	// ==========================================
-	// START LAPTOP WEBCAM WHEN TEST STARTS
-	// ==========================================
-
-useEffect(() => {
-	if (hasStarted) {
-		const startLaptopCamera = async () => {
-			try {
-				const stream = await navigator.mediaDevices.getUserMedia({
-					video: true,
-					audio: true,
-				});
-				laptopStreamRef.current = stream;
-				setLaptopStream(stream);
-			} catch (err) {
-				handleViolation("Laptop Camera/Mic access is mandatory.");
-			}
-		};
-		startLaptopCamera();
-	}
-	return () => {
-		if (laptopStreamRef.current) {
-			laptopStreamRef.current.getTracks().forEach((track) => track.stop());
-		}
-	};
-}, [hasStarted]);
-
-// BUG 3 FIX: Industry standard video binding
-useEffect(() => {
-	if (laptopVideoRef.current && laptopStream) {
-		laptopVideoRef.current.srcObject = laptopStream;
-	}
-}, [laptopStream, hasStarted]);
 
 	if (loading || authLoading)
 		return (
@@ -536,30 +579,42 @@ useEffect(() => {
 		);
 	}
 
-	// ==========================================
-	// 1. RE-DESIGNED MULTI-DEVICE GATEWAY SCREEN
-	// ==========================================
-	if (!hasStarted) {
-		return (
-			<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4">
-				<div className="max-w-4xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl flex flex-col md:flex-row gap-10">
+	const currentMcq = assessment.mcqs[currentMcqIndex];
+	const currentDsa = assessment.dsaQuestions[0];
+
+	return (
+		<>
+			{toastMessage && (
+				<div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[99999] bg-slate-800 border border-slate-600 text-white px-8 py-4 rounded-xl font-bold shadow-2xl animate-bounce text-lg">
+					{toastMessage}
+				</div>
+			)}
+
+			{/* 1. GATEWAY SCREEN */}
+			<div
+				className={`min-h-screen bg-slate-950 text-white flex-col items-center justify-center p-4 md:p-8 ${!hasStarted ? "flex" : "hidden"}`}>
+				<div className="max-w-6xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl flex flex-col lg:flex-row gap-10">
 					{/* LEFT COLUMN: RULES */}
 					<div className="flex-1 flex flex-col justify-center">
-						<div className="w-16 h-16 bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mb-6">
-							<Info size={32} />
-						</div>
-						<h1 className="text-3xl font-bold mb-2">{assessment.title}</h1>
-						<p className="text-slate-400 mb-8">{assessment.description}</p>
-
-						<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl text-left shadow-lg">
-							<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2">
+						<h1 className="text-4xl font-bold mb-4">{assessment.title}</h1>
+						<p className="text-slate-400 mb-8 text-lg">
+							{assessment.description}
+						</p>
+						<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl text-left shadow-lg max-w-xl">
+							<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2 text-lg">
 								⚠️ Strict Proctoring Rules
 							</h3>
-							<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
+							<ul className="text-base text-slate-300 space-y-3 list-disc list-inside">
 								<li>Your browser will be locked into Fullscreen mode.</li>
 								<li>
 									<strong>
 										Do not switch tabs, minimize, or use virtual desktops.
+									</strong>{" "}
+									Doing so will result in an instant strike.
+								</li>
+								<li>
+									<strong>
+										Copying and Pasting is strictly disabled.
 									</strong>
 								</li>
 								<li>
@@ -568,25 +623,51 @@ useEffect(() => {
 									</strong>{" "}
 									to track your workspace.
 								</li>
-								<li>3 Strikes will result in automatic submission.</li>
 							</ul>
 						</div>
 					</div>
 
-					{/* RIGHT COLUMN: QR CODE PAIRING */}
-					<div className="w-full md:w-80 bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center text-center shadow-inner">
-						<h3 className="font-bold text-white mb-2 flex items-center gap-2">
-							<Smartphone size={20} className="text-blue-400" /> Step 1:
-							Link Device
+					{/* RIGHT COLUMN: LARGE CAMERA PREVIEW & QR CODE */}
+					<div className="w-full lg:w-[450px] bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center shadow-inner">
+						<h3 className="font-bold text-white mb-3 flex items-center gap-2 text-lg">
+							<Camera size={22} className="text-blue-400" /> 1. Primary
+							Camera (Laptop)
 						</h3>
-						<p className="text-xs text-slate-400 mb-6 px-4">
-							Scan this QR code with your phone to activate the secondary
-							camera.
-						</p>
+						{/* LAPTOP CAMERA PREVIEW (LARGE) */}
+						<div className="w-full aspect-video bg-black rounded-xl overflow-hidden shadow-inner mb-6 relative border border-slate-700">
+							{laptopStream ? (
+								<video
+									ref={laptopVideoRef}
+									autoPlay
+									playsInline
+									muted
+									className="w-full h-full object-cover"
+									style={{ transform: "scaleX(-1)" }}
+								/>
+							) : (
+								<div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
+									<Loader2 className="animate-spin mb-2" /> Activating
+									Camera...
+								</div>
+							)}
+							<div className="absolute top-3 left-3 bg-black/60 px-3 py-1 text-xs font-bold rounded-lg text-white flex items-center gap-2">
+								<div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{" "}
+								Active
+							</div>
+						</div>
 
+						<div className="w-full h-px bg-slate-800 mb-6"></div>
+
+						<h3 className="font-bold text-white mb-2 flex items-center gap-2 text-lg">
+							<Smartphone size={22} className="text-blue-400" /> 2.
+							Secondary Camera (Mobile)
+						</h3>
+						<p className="text-sm text-slate-400 mb-4 px-4 text-center">
+							Scan this QR code to activate the secondary view.
+						</p>
 						<div className="bg-white p-4 rounded-xl mb-6 shadow-md">
 							{pairingUrl ? (
-								<QRCodeSVG value={pairingUrl} size={160} />
+								<QRCodeSVG value={pairingUrl} size={150} />
 							) : (
 								<Loader2 className="animate-spin text-slate-800" />
 							)}
@@ -603,122 +684,87 @@ useEffect(() => {
 									for Mobile...
 								</div>
 							)}
-							<p className="text-[10px] text-slate-500 mt-2">
-								Tip: Ensure your laptop is accessed via its Local Network
-								IP (e.g. 192.168.x.x) instead of localhost for the phone to
-								connect.
-							</p>
 						</div>
 
 						<button
 							onClick={startAssessment}
-							disabled={!isMobileConnected}
-							className={`w-full font-bold py-4 rounded-xl text-lg transition-all ${
-								isMobileConnected
-									? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/40"
-									: "bg-slate-800 text-slate-500 cursor-not-allowed"
-							}`}>
-							Step 2: Start Test
+							disabled={!isMobileConnected || !laptopStream}
+							className={`w-full font-bold py-4 rounded-xl text-xl transition-all ${isMobileConnected && laptopStream ? "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]" : "bg-slate-800 text-slate-500 cursor-not-allowed"}`}>
+							{!laptopStream
+								? "Waiting for Camera..."
+								: "Start Assessment"}
 						</button>
 					</div>
 				</div>
 			</div>
-		);
-	}
 
-	// 2. RED SCREEN OF DEATH
-if (showWarningModal || !isFullscreen) {
-	return (
-		<div className="min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-8 text-center relative">
-			<AlertTriangle
-				size={80}
-				className="text-red-500 mb-6 animate-pulse"
-			/>
-			<h1 className="text-5xl font-black text-white mb-4 tracking-tight">
-				PROCTORING WARNING
-			</h1>
-			<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
-				<p className="text-xl text-red-100 font-bold">
-					{violationMessage || "You are out of fullscreen mode."}
-				</p>
+			{/* 2. RED SCREEN OF DEATH */}
+			<div
+				className={`min-h-screen bg-red-950 text-white flex-col items-center justify-center p-8 text-center relative z-[99999] ${showWarningModal || (!isFullscreen && hasStarted) ? "flex" : "hidden"}`}>
+				<AlertTriangle
+					size={80}
+					className="text-red-500 mb-6 animate-pulse"
+				/>
+				<h1 className="text-5xl font-black text-white mb-4 tracking-tight">
+					PROCTORING WARNING
+				</h1>
+				<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
+					<p className="text-xl text-red-100 font-bold">
+						{violationMessage || "You are out of fullscreen mode."}
+					</p>
+				</div>
+				{warnings >= MAX_WARNINGS ? (
+					<div className="text-xl font-bold animate-pulse text-red-300">
+						Auto-Submitting Assessment...
+					</div>
+				) : !isMobileConnected ? (
+					<div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 flex flex-col items-center max-w-md shadow-2xl">
+						<h3 className="text-2xl font-bold text-red-400 mb-2">
+							Secondary Camera Missing!
+						</h3>
+						<p className="text-slate-300 mb-6 text-sm">
+							Your mobile device disconnected. You cannot return to the
+							assessment until it is re-linked.
+						</p>
+						<div className="bg-white p-4 rounded-xl mb-4 shadow-lg">
+							<QRCodeSVG value={pairingUrl} size={140} />
+						</div>
+						<div className="flex items-center gap-2 text-yellow-500 font-bold animate-pulse">
+							<Loader2 size={18} className="animate-spin" /> Waiting for
+							Mobile...
+						</div>
+						<div className="text-lg font-bold text-red-400 mt-4">
+							Auto-submitting in {warningCountdown}s...
+						</div>
+					</div>
+				) : (
+					<>
+						<p className="text-2xl font-bold text-slate-300 mb-2">
+							Strike{" "}
+							<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
+							{MAX_WARNINGS}
+						</p>
+						<div className="text-xl font-bold animate-pulse text-red-300 mb-6">
+							Auto-submitting in {warningCountdown}s if ignored...
+						</div>
+						<button
+							onClick={handleAcknowledgeWarning}
+							className="bg-blue-600 text-white font-black w-full p-[2em] rounded-xl text-xl hover:bg-blue-500 hover:scale-105 transition-all shadow-[0_0_30px_rgba(37,99,235,0.6)] border border-blue-400 cursor-pointer flex items-center justify-center">
+							I Understand. Return to Test in Fullscreen.
+						</button>
+					</>
+				)}
 			</div>
 
-			{warnings >= MAX_WARNINGS ? (
-				<div className="text-xl font-bold animate-pulse text-red-300">
-					Auto-Submitting Assessment...
-				</div>
-			) : !isMobileConnected ? (
-				// BUG 1 FIX: If mobile is disconnected, they CANNOT proceed.
-				<div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 flex flex-col items-center max-w-md shadow-2xl">
-					<h3 className="text-2xl font-bold text-red-400 mb-2">
-						Secondary Camera Missing!
-					</h3>
-					<p className="text-slate-300 mb-6 text-sm">
-						Your mobile device disconnected. You cannot return to the
-						assessment until it is re-linked.
-					</p>
-					<div className="bg-white p-4 rounded-xl mb-4 shadow-lg">
-						<QRCodeSVG value={pairingUrl} size={140} />
-					</div>
-					<div className="flex items-center gap-2 text-yellow-500 font-bold animate-pulse">
-						<Loader2 size={18} className="animate-spin" /> Waiting for
-						Mobile...
-					</div>
-				</div>
-			) : (
-				<>
-					<p className="text-2xl font-bold text-slate-300 mb-2">
-						Strike{" "}
-						<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
-						{MAX_WARNINGS}
-					</p>
-					<button
-						onClick={handleAcknowledgeWarning}
-						className="bg-white text-red-900 font-black px-10 py-5 rounded-xl text-xl hover:bg-slate-200 transition-transform hover:scale-105 shadow-2xl">
-						I Understand. Return to Test in Fullscreen.
-					</button>
-				</>
-			)}
-		</div>
-	);
-}
-
-	const currentMcq = assessment.mcqs[currentMcqIndex];
-	const currentDsa = assessment.dsaQuestions[0];
-
-	return (
-		<>
-			{/* THE MAIN TEST UI */}
+			{/* 3. MAIN TEST UI */}
 			<div
-				className={`h-[100dvh] bg-slate-950 text-white flex flex-col overflow-hidden ${isDragging ? "select-none cursor-col-resize" : ""}`}>
-				{toastMessage && (
-					<div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[99999] bg-slate-800 border border-slate-600 text-white px-8 py-4 rounded-xl font-bold shadow-2xl animate-bounce text-lg">
-						{toastMessage}
-					</div>
-				)}
-
-				{/* --- FLOATING LAPTOP WEBCAM (Picture-in-Picture) --- */}
-				{hasStarted && (
-					<div className="fixed bottom-6 right-6 z-[9999] w-48 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 pointer-events-none">
-						<video
-							ref={laptopVideoRef}
-							autoPlay={true}
-							playsInline={true}
-							muted={true}
-							className="w-full h-full object-cover"
-							style={{ transform: "scaleX(-1)" }}
-						/>
-						<div className="absolute top-2 right-2 bg-red-600 w-2.5 h-2.5 rounded-full animate-pulse"></div>
-					</div>
-				)}
-
+				className={`h-[100dvh] bg-slate-950 text-white flex-col overflow-hidden ${isDragging ? "select-none cursor-col-resize" : ""} ${hasStarted && isFullscreen && !showWarningModal ? "flex" : "hidden"}`}>
 				{/* TOP NAVIGATION BAR */}
 				<div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-20">
 					<div className="flex items-center gap-4">
 						<button
 							onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-							className="text-slate-400 hover:text-white transition-colors"
-							title="Toggle Sidebar">
+							className="text-slate-400 hover:text-white transition-colors">
 							{isSidebarOpen ? (
 								<PanelLeftClose size={24} />
 							) : (
@@ -729,7 +775,6 @@ if (showWarningModal || !isFullscreen) {
 							{assessment.title}
 						</div>
 					</div>
-
 					<div className="flex items-center gap-4 md:gap-6">
 						<div className="hidden md:flex items-center gap-2 bg-red-950/30 border border-red-900/50 px-3 py-1.5 rounded-lg">
 							<AlertTriangle
@@ -748,134 +793,88 @@ if (showWarningModal || !isFullscreen) {
 								</span>
 							</span>
 						</div>
-
 						<div
 							className={`flex items-center gap-2 font-mono text-lg md:text-xl font-bold px-3 py-1.5 rounded-lg ${timeLeft < 300 ? "bg-red-900/50 text-red-400 border border-red-500/50 animate-pulse" : "bg-slate-800 text-blue-400"}`}>
 							<Clock size={20} />
 							{formatTime(timeLeft)}
 						</div>
-
-						{/* THE BUTTON */}
 						<button
-							type="button"
 							onClick={(e) => {
 								e.preventDefault();
 								e.stopPropagation();
 								setShowConfirmModal(true);
 							}}
 							disabled={isSubmitting}
-							className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg transition-colors shadow-lg shadow-red-900/20">
+							className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white text-sm md:text-base font-bold py-2 px-4 md:px-6 rounded-lg shadow-lg shadow-red-900/20">
 							{isSubmitting ? (
 								<Loader2 className="animate-spin" size={18} />
-							) : null}
+							) : null}{" "}
 							{isSubmitting ? "Grading..." : "End Assessment"}
 						</button>
 					</div>
 				</div>
 
 				<div className="flex-1 flex overflow-hidden relative">
-					{/* DYNAMIC LEFT SIDEBAR */}
 					<div
 						className={`${isSidebarOpen ? "w-64" : "w-16"} bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 z-10 transition-all duration-300 ease-in-out`}>
-						<div
-							className={`p-4 border-b border-slate-800 font-bold text-slate-400 uppercase text-xs tracking-wider flex items-center ${isSidebarOpen ? "justify-start" : "justify-center"}`}>
-							{isSidebarOpen ? "Sections" : "..."}
-						</div>
 						<button
 							onClick={() => setActiveTab("mcq")}
-							title="Multiple Choice"
-							className={`flex items-center p-4 font-bold transition-colors border-l-4 ${activeTab === "mcq" ? "bg-slate-800 border-blue-500 text-white" : "border-transparent text-slate-400 hover:bg-slate-800/50"} ${!isSidebarOpen && "justify-center"}`}>
+							className={`flex items-center p-4 font-bold transition-colors border-l-4 ${activeTab === "mcq" ? "bg-slate-800 border-blue-500 text-white" : "border-transparent text-slate-400"}`}>
 							<FileText
 								size={20}
 								className={isSidebarOpen ? "mr-3" : "mr-0"}
 							/>
-							{isSidebarOpen && (
-								<span className="truncate">
-									MCQ ({assessment.mcqs?.length || 0})
-								</span>
-							)}
+							{isSidebarOpen && "MCQ"}
 						</button>
 						<button
 							onClick={() => setActiveTab("dsa")}
-							title="Coding Challenge"
-							className={`flex items-center p-4 font-bold transition-colors border-l-4 ${activeTab === "dsa" ? "bg-slate-800 border-blue-500 text-white" : "border-transparent text-slate-400 hover:bg-slate-800/50"} ${!isSidebarOpen && "justify-center"}`}>
+							className={`flex items-center p-4 font-bold transition-colors border-l-4 ${activeTab === "dsa" ? "bg-slate-800 border-blue-500 text-white" : "border-transparent text-slate-400"}`}>
 							<Code2
 								size={20}
 								className={isSidebarOpen ? "mr-3" : "mr-0"}
 							/>
-							{isSidebarOpen && (
-								<span className="truncate">
-									Coding ({assessment.dsaQuestions?.length || 0})
-								</span>
-							)}
+							{isSidebarOpen && "Coding"}
 						</button>
 					</div>
 
-					{/* MAIN CONTENT AREA */}
 					<div className="flex-1 bg-slate-950 flex overflow-hidden relative">
 						{isDragging && (
 							<div className="absolute inset-0 z-50 cursor-col-resize" />
 						)}
-
-						{/* MCQ SECTION */}
 						{activeTab === "mcq" && currentMcq && (
-							<div className="w-full h-full overflow-y-auto custom-scrollbar">
-								<div className="max-w-3xl mx-auto p-8 mt-8">
-									<div className="flex justify-between items-center mb-8">
-										<h2 className="text-2xl font-bold">
-											Question {currentMcqIndex + 1} of{" "}
-											{assessment.mcqs.length}
-										</h2>
-										<span className="text-slate-400 font-bold">
-											{currentMcq.marks} Pts
-										</span>
-									</div>
-									<p className="text-lg text-slate-200 mb-8 bg-slate-900 p-6 rounded-xl border border-slate-800">
-										{currentMcq.question}
-									</p>
-									<div className="space-y-4 mb-12">
-										{currentMcq.options.map((option, idx) => (
-											<button
-												key={idx}
-												onClick={() => handleMcqSelect(idx)}
-												className={`w-full text-left p-4 rounded-xl border transition-all font-medium ${mcqAnswers[currentMcqIndex] === idx ? "bg-blue-600/20 border-blue-500 text-blue-100 ring-2 ring-blue-500/50" : "bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800"}`}>
-												<span className="inline-block w-8 h-8 text-center leading-8 rounded-lg bg-slate-950 mr-4 font-bold border border-slate-700">
-													{String.fromCharCode(65 + idx)}
-												</span>
-												{option}
-											</button>
-										))}
-									</div>
-									<div className="flex justify-between">
+							<div className="w-full h-full overflow-y-auto custom-scrollbar p-8">
+								<h2 className="text-2xl font-bold mb-8">
+									Question {currentMcqIndex + 1}
+								</h2>
+								<p className="text-lg text-slate-200 mb-8 bg-slate-900 p-6 rounded-xl border border-slate-800">
+									{currentMcq.question}
+								</p>
+								<div className="space-y-4 mb-12">
+									{currentMcq.options.map((option, idx) => (
 										<button
-											disabled={currentMcqIndex === 0}
-											onClick={() =>
-												setCurrentMcqIndex((prev) => prev - 1)
-											}
-											className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold disabled:opacity-50">
-											<ChevronLeft size={20} /> Previous
+											key={idx}
+											onClick={() => handleMcqSelect(idx)}
+											className={`w-full text-left p-4 rounded-xl border font-medium ${mcqAnswers[currentMcqIndex] === idx ? "bg-blue-600/20 border-blue-500 text-blue-100" : "bg-slate-900 border-slate-700 text-slate-300"}`}>
+											{option}
 										</button>
-										{currentMcqIndex < assessment.mcqs.length - 1 ? (
-											<button
-												onClick={() =>
-													setCurrentMcqIndex((prev) => prev + 1)
-												}
-												className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold">
-												Next <ChevronRight size={20} />
-											</button>
-										) : (
-											<button
-												onClick={() => setActiveTab("dsa")}
-												className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold">
-												Move to Coding <ChevronRight size={20} />
-											</button>
-										)}
-									</div>
+									))}
+								</div>
+								<div className="flex justify-between">
+									<button
+										disabled={currentMcqIndex === 0}
+										onClick={() => setCurrentMcqIndex((prev) => prev - 1)}
+										className="px-6 py-3 bg-slate-800 rounded-lg font-bold">
+										Previous
+									</button>
+									<button
+										onClick={() => setCurrentMcqIndex((prev) => prev + 1)}
+										className="px-6 py-3 bg-blue-600 rounded-lg font-bold">
+										Next
+									</button>
 								</div>
 							</div>
 						)}
 
-						{/* DSA SECTION */}
 						{activeTab === "dsa" && currentDsa && (
 							<div
 								ref={splitContainerRef}
@@ -943,7 +942,6 @@ if (showWarningModal || !isFullscreen) {
 										</div>
 									))}
 								</div>
-
 								<div
 									onMouseDown={(e) => {
 										e.preventDefault();
@@ -954,7 +952,6 @@ if (showWarningModal || !isFullscreen) {
 										<GripVertical size={16} className="text-slate-400" />
 									</div>
 								</div>
-
 								<div
 									style={{ width: `${100 - leftPanelWidth}%` }}
 									className="flex flex-col bg-[#1e1e1e]">
@@ -1059,7 +1056,7 @@ if (showWarningModal || !isFullscreen) {
 				</div>
 			</div>
 
-			{/* --- THE MODAL IS NOW OUTSIDE THE APP CONTAINER TO FIX CSS Z-INDEX HIDING --- */}
+			{/* CONFIRM MODAL */}
 			{showConfirmModal && (
 				<div
 					style={{ zIndex: 9999999 }}
@@ -1091,7 +1088,7 @@ if (showWarningModal || !isFullscreen) {
 								className="flex-1 px-6 py-4 rounded-xl font-bold bg-green-600 hover:bg-green-500 text-white transition-colors flex items-center justify-center gap-2">
 								{isSubmitting ? (
 									<Loader2 className="animate-spin" size={18} />
-								) : null}
+								) : null}{" "}
 								Yes, Submit
 							</button>
 						</div>
