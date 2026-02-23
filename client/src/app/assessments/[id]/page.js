@@ -26,7 +26,8 @@ import {
 	Lock,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import * as faceapi from "@vladmandic/face-api";
+
+let faceapi;
 
 const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
 
@@ -64,6 +65,9 @@ export default function AssessmentEnvironment() {
 	const [laptopStream, setLaptopStream] = useState(null);
 	const [toastMessage, setToastMessage] = useState("");
 
+	const [isAiReady, setIsAiReady] = useState(false);
+	const [isVerifying, setIsVerifying] = useState(false);
+
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -79,6 +83,8 @@ export default function AssessmentEnvironment() {
 
 	const faceDetectionIntervalRef = useRef(null);
 	const lookAwayTimerRef = useRef(0);
+	const anchorDescriptorRef = useRef(null); // Stores the original face identity
+	const latestMobileDescriptorRef = useRef(null);
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -155,6 +161,31 @@ export default function AssessmentEnvironment() {
 		});
 		socket.on("trigger_laptop_strike", (reason) => {
 			handleViolation(`Mobile Proctor Alert: ${reason}`);
+		});
+
+		socket.on("mobile_face_descriptor", (mobileDescriptorArray) => {
+			const mobileDescriptor = new Float32Array(mobileDescriptorArray);
+
+			// Always save the latest mobile scan so it's ready when they click "Start"
+			latestMobileDescriptorRef.current = mobileDescriptor;
+
+			if (
+				!hasStartedRef.current ||
+				showWarningModalRef.current ||
+				!anchorDescriptorRef.current ||
+				!faceapi
+			)
+				return;
+
+			const distance = faceapi.euclideanDistance(
+				anchorDescriptorRef.current,
+				mobileDescriptor,
+			);
+			if (distance > 0.65) {
+				handleViolation(
+					"Identity mismatch! Unauthorized person detected on the mobile camera.",
+				);
+			}
 		});
 
 		return () => socket.disconnect();
@@ -276,70 +307,92 @@ export default function AssessmentEnvironment() {
 	// ==========================================
 	// AI VISION ENGINE: LAPTOP FACE TRACKING
 	// ==========================================
-	useEffect(() => {
-		// Only run when the assessment is active and the laptop video is physically playing
-		if (!hasStarted || !laptopStream || !laptopVideoRef.current) return;
-
-		const loadAiModels = async () => {
-			try {
-				// Load the lightweight Face Detector model from a fast CDN (Zero Server Cost)
-				const MODEL_URL =
-					"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
-				await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-				console.log("✅ Local Browser AI Vision Loaded");
-				startFaceTracking();
-			} catch (err) {
-				console.error("AI Model Load Error:", err);
+useEffect(() => {
+	// THE FIX: We no longer wait for the camera or Step 3 to start downloading models.
+	// They will download in the background during Step 1 and 2.
+	const loadAiModels = async () => {
+		try {
+			if (!faceapi) {
+				const module = await import("@vladmandic/face-api");
+				// Safely handle Next.js ESM dynamic module exports
+				faceapi = module.default || module;
 			}
-		};
 
-		const startFaceTracking = () => {
-			const video = laptopVideoRef.current;
+			const MODEL_URL =
+				"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+			await Promise.all([
+				faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+				faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+				faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+			]);
+			console.log("✅ Local Browser AI Vision & Identity Loaded");
+			setIsAiReady(true);
+		} catch (err) {
+			console.error("AI Model Load Error:", err);
+		}
+	};
 
-			// Scan the video feed every 1.5 seconds (Saves CPU, prevents lag)
-			faceDetectionIntervalRef.current = setInterval(async () => {
-				// Halt scanning if they are on the warning screen or submitting
-				if (showWarningModalRef.current || isSubmittingRef.current) return;
-				if (!video || video.paused || video.ended) return;
+	if (!isAiReady) loadAiModels();
+}, [isAiReady]);
 
-				const detections = await faceapi.detectAllFaces(
-					video,
-					new faceapi.TinyFaceDetectorOptions({
-						inputSize: 224,
-						scoreThreshold: 0.5,
-					}),
+useEffect(() => {
+	// Only run continuous tracking AFTER the test has officially started
+	if (!isAiReady || !hasStarted || !faceapi) return;
+
+	const video = laptopVideoRef.current;
+
+	faceDetectionIntervalRef.current = setInterval(async () => {
+		if (showWarningModalRef.current || isSubmittingRef.current) return;
+		if (!video || video.paused || video.ended || video.readyState !== 4)
+			return;
+
+		const detections = await faceapi
+			.detectAllFaces(
+				video,
+				new faceapi.TinyFaceDetectorOptions({
+					inputSize: 224,
+					scoreThreshold: 0.5,
+				}),
+			)
+			.withFaceLandmarks()
+			.withFaceDescriptors();
+
+		const faceCount = detections.length;
+
+		if (faceCount === 0) {
+			lookAwayTimerRef.current += 1;
+			if (lookAwayTimerRef.current >= 3) {
+				handleViolation("Candidate's face is not visible in the frame.");
+				lookAwayTimerRef.current = 0;
+			}
+		} else if (faceCount > 1) {
+			handleViolation(
+				"Multiple faces detected! Unauthorized assistance suspected.",
+			);
+			lookAwayTimerRef.current = 0;
+		} else if (faceCount === 1) {
+			lookAwayTimerRef.current = 0;
+
+			// Ensure the current person matches the person who started the test
+			if (anchorDescriptorRef.current) {
+				const distance = faceapi.euclideanDistance(
+					anchorDescriptorRef.current,
+					detections[0].descriptor,
 				);
-
-				const faceCount = detections.length;
-
-				if (faceCount === 0) {
-					lookAwayTimerRef.current += 1;
-					// 3 consecutive missed scans (1.5s * 3 = 7.5 seconds of missing/looking away)
-					if (lookAwayTimerRef.current >= 5) {
-						handleViolation(
-							"Candidate's Face is not in the Frame",
-						);
-						lookAwayTimerRef.current = 0;
-					}
-				} else if (faceCount > 1) {
+				if (distance > 0.65) {
 					handleViolation(
-						"Multiple faces detected! Unauthorized assistance suspected.",
+						"Identity mismatch! Different person detected on laptop camera.",
 					);
-					lookAwayTimerRef.current = 0;
-				} else {
-					// Exactly 1 face is present, reset the looking away timer
-					lookAwayTimerRef.current = 0;
 				}
-			}, 1500);
-		};
+			}
+		}
+	}, 1500);
 
-		loadAiModels();
-
-		return () => {
-			if (faceDetectionIntervalRef.current)
-				clearInterval(faceDetectionIntervalRef.current);
-		};
-	}, [hasStarted, laptopStream]);
+	return () => {
+		if (faceDetectionIntervalRef.current)
+			clearInterval(faceDetectionIntervalRef.current);
+	};
+}, [hasStarted, isAiReady]);
 
 	// ==========================================
 	// BULLETPROOF PROCTORING ENGINE
@@ -569,27 +622,97 @@ export default function AssessmentEnvironment() {
 	};
 
 	const startAssessment = async () => {
-		if (
-			document.fullscreenElement &&
-			window.innerHeight < window.screen.height - 15
-		) {
-			try {
-				await exitFullscreen();
-			} catch (e) {
-				toast.error("Browser Blocked Fullscreen");
-			}
+		if (!faceapi) {
+			toast.error("AI Models are still loading. Please wait a moment.");
+			return;
 		}
 
-		enterFullscreenAndExecute(
-			() => {
-				setHasStarted(true);
-				setIsFullscreen(true);
-				isFullscreenRef.current = true;
-			},
-			(err) => {
-				toast.error("Some Error Occured");
-			},
-		);
+		setIsVerifying(true);
+		const toastId = toast.loading("Verifying identity across devices...");
+
+		try {
+			const video = laptopVideoRef.current;
+			if (
+				!video ||
+				video.paused ||
+				video.ended ||
+				video.readyState !== 4
+			) {
+				throw new Error("Laptop camera feed is not ready.");
+			}
+
+			// 1. Scan the Laptop Camera on-demand
+			const detections = await faceapi
+				.detectAllFaces(
+					video,
+					new faceapi.TinyFaceDetectorOptions({
+						inputSize: 224,
+						scoreThreshold: 0.5,
+					}),
+				)
+				.withFaceLandmarks()
+				.withFaceDescriptors();
+
+			if (detections.length === 0)
+				throw new Error(
+					"No face detected on laptop camera. Please look at the screen.",
+				);
+			if (detections.length > 1)
+				throw new Error(
+					"Multiple faces detected! Please ensure you are alone.",
+				);
+
+			const laptopFace = detections[0].descriptor;
+
+			// 2. Ensure Mobile Phone has sent a scan
+			if (!latestMobileDescriptorRef.current) {
+				throw new Error(
+					"Waiting for mobile camera scan. Ensure your face is visible on your phone.",
+				);
+			}
+
+			// 3. Compare the two faces
+			const distance = faceapi.euclideanDistance(
+				laptopFace,
+				latestMobileDescriptorRef.current,
+			);
+			if (distance > 0.65) {
+				throw new Error(
+					"Identity mismatch! The person on the mobile camera does not match the laptop.",
+				);
+			}
+
+			// 4. Success! Lock the anchor and enter fullscreen.
+			anchorDescriptorRef.current = laptopFace;
+			console.log("🔒 Identity Verified & Anchor Locked!");
+
+			if (
+				document.fullscreenElement &&
+				window.innerHeight < window.screen.height - 15
+			) {
+				try {
+					await exitFullscreen();
+				} catch (e) {}
+			}
+
+			enterFullscreenAndExecute(
+				() => {
+					toast.dismiss(toastId);
+					setHasStarted(true);
+					setIsFullscreen(true);
+					isFullscreenRef.current = true;
+				},
+				(err) => {
+					toast.dismiss(toastId);
+					toast.error(err);
+				},
+			);
+		} catch (err) {
+			toast.dismiss(toastId);
+			toast.error(err.message || "Verification failed. Try again.");
+		} finally {
+			setIsVerifying(false);
+		}
 	};
 
 	const handleAcknowledgeWarning = async () => {
@@ -877,10 +1000,6 @@ export default function AssessmentEnvironment() {
 													Activating...
 												</div>
 											)}
-											<div className="absolute top-3 left-3 bg-black/60 px-3 py-1 text-xs font-bold rounded-lg text-white flex items-center gap-2">
-												<div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{" "}
-												Tracking Active
-											</div>
 										</div>
 									</div>
 
@@ -890,7 +1009,7 @@ export default function AssessmentEnvironment() {
 											<Smartphone size={18} className="text-purple-400" />{" "}
 											Secondary Camera (Mobile)
 										</h3>
-										<div className="w-full aspect-video bg-slate-900 border-2 border-dashed border-slate-700 p-4 mt-8 rounded-xl flex flex-col items-center justify-center relative">
+										<div className="w-full aspect-video bg-slate-900 border-2 border-dashed border-slate-700 p-4 rounded-xl flex flex-col items-center justify-center relative">
 											{isMobileConnected ? (
 												<>
 													<div className="w-16 h-16 bg-green-900/20 text-green-500 rounded-full flex items-center justify-center mb-4 border border-green-500/30">
@@ -928,11 +1047,20 @@ export default function AssessmentEnvironment() {
 									</button>
 									<button
 										onClick={startAssessment}
-										disabled={!laptopStream || !isMobileConnected}
-										className={`font-bold p-4 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
-										{laptopStream && isMobileConnected
-											? "Start Assessment"
-											: "Waiting for Cameras..."}
+										disabled={
+											!laptopStream || !isMobileConnected || isVerifying
+										}
+										className={`font-bold p-4 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected && !isVerifying ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
+										{isVerifying ? (
+											<>
+												<Loader2 className="animate-spin" size={20} />{" "}
+												Verifying...
+											</>
+										) : !laptopStream || !isMobileConnected ? (
+											"Waiting for Cameras..."
+										) : (
+											"Verify & Start Assessment"
+										)}
 									</button>
 								</div>
 							</div>

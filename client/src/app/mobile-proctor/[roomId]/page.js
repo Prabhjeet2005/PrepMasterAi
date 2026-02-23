@@ -4,6 +4,8 @@ import { useParams } from "next/navigation";
 import { io } from "socket.io-client";
 import { CheckCircle2, ShieldAlert, Loader2, Flag } from "lucide-react";
 
+let faceapi;
+
 export default function MobileProctorPage() {
 	const { roomId } = useParams();
 	const [status, setStatus] = useState("connecting");
@@ -12,6 +14,7 @@ export default function MobileProctorPage() {
 	const streamRef = useRef(null);
 	const videoRef = useRef(null);
 	const socketRef = useRef(null);
+	const faceScanIntervalRef = useRef(null); // ADD THIS
 
 	useEffect(() => {
 		socketRef.current = io(process.env.NEXT_PUBLIC_API_URL);
@@ -46,29 +49,30 @@ export default function MobileProctorPage() {
 	}, [roomId]);
 
 	// INSTANT KILL ON BACKGROUNDING
-	useEffect(() => {
-		const handleVisibilityChange = () => {
-			if (document.hidden && status === "paired" && socketRef.current) {
-				socketRef.current.emit("mobile_violation_detected", {
-					roomId,
-					reason: "Mobile browser minimized or backgrounded.",
-				});
-				if (streamRef.current)
-					streamRef.current.getTracks().forEach((track) => track.stop());
-				socketRef.current.disconnect();
-				setStatus("disconnected");
-			}
-		};
-		document.addEventListener("visibilitychange", handleVisibilityChange);
-		window.addEventListener("blur", handleVisibilityChange);
-		return () => {
-			document.removeEventListener(
-				"visibilitychange",
-				handleVisibilityChange,
-			);
-			window.removeEventListener("blur", handleVisibilityChange);
-		};
-	}, [status, roomId]);
+useEffect(() => {
+	const handleVisibilityChange = () => {
+		// THE FIX: Only trigger if the document is completely hidden (swapped apps or minimized)
+		if (document.hidden && status === "paired" && socketRef.current) {
+			socketRef.current.emit("mobile_violation_detected", {
+				roomId,
+				reason: "Mobile browser minimized or backgrounded.",
+			});
+			if (streamRef.current)
+				streamRef.current.getTracks().forEach((track) => track.stop());
+			socketRef.current.disconnect();
+			setStatus("disconnected");
+		}
+	};
+
+	document.addEventListener("visibilitychange", handleVisibilityChange);
+
+	return () => {
+		document.removeEventListener(
+			"visibilitychange",
+			handleVisibilityChange,
+		);
+	};
+}, [status, roomId]);
 
 	// START CAMERA
 	useEffect(() => {
@@ -111,6 +115,69 @@ export default function MobileProctorPage() {
 			video.play().catch((e) => console.error("Mobile Play Error:", e));
 		}
 	}, [mediaStream, status]);
+
+	// ==========================================
+	// MOBILE AI: FACE DESCRIPTOR GENERATOR
+	// ==========================================
+useEffect(() => {
+	const loadModels = async () => {
+		try {
+			if (!faceapi) {
+				const module = await import("@vladmandic/face-api");
+				// Safely handle Next.js ESM dynamic module exports
+				faceapi = module.default || module;
+			}
+			const MODEL_URL =
+				"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+			await Promise.all([
+				faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+				faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+				faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+			]);
+			console.log("✅ Mobile AI Identity Models Loaded");
+		} catch (e) {
+			console.error("Mobile Model load error", e);
+		}
+	};
+	loadModels();
+}, []);
+
+	useEffect(() => {
+		if (status !== "paired" || !mediaStream || !videoRef.current) return;
+
+		const video = videoRef.current;
+
+		// Scan every 3 seconds to save mobile battery while maintaining security
+		faceScanIntervalRef.current = setInterval(async () => {
+			if (video.paused || video.ended || !socketRef.current) return;
+
+			// Detect the single largest face in the mobile view
+			const detection = await faceapi
+				.detectSingleFace(
+					video,
+					new faceapi.TinyFaceDetectorOptions({
+						inputSize: 224,
+						scoreThreshold: 0.5,
+					}),
+				)
+				.withFaceLandmarks()
+				.withFaceDescriptor();
+
+			if (detection) {
+				// Convert Float32Array to standard array so it can survive WebSocket JSON serialization
+				const descriptorArray = Array.from(detection.descriptor);
+				socketRef.current.emit("send_mobile_face_descriptor", {
+					roomId,
+					descriptor: descriptorArray,
+				});
+			}
+		}, 3000);
+
+		return () => {
+			if (faceScanIntervalRef.current)
+				clearInterval(faceScanIntervalRef.current);
+		};
+	}, [status, mediaStream, roomId]);
 
 	return (
 		<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">

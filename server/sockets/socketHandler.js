@@ -154,6 +154,11 @@ const setupSocket = (io) => {
 			socket.to(roomId).emit("trigger_laptop_strike", reason);
 		});
 
+		// Relay face mathematics from mobile to laptop
+		socket.on("send_mobile_face_descriptor", ({ roomId, descriptor }) => {
+			socket.to(roomId).emit("mobile_face_descriptor", descriptor);
+		});
+
 		// 4. Laptop ends the session completely
 		socket.on("end_proctoring_session", (roomId) => {
 			console.log(`[Proctor Socket] Session ended for room: ${roomId}`);
