@@ -22,7 +22,10 @@ import {
 	Smartphone,
 	CheckCircle2,
 	Camera,
+	ShieldCheck,
+	Lock,
 } from "lucide-react";
+import toast from "react-hot-toast";
 
 const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
 
@@ -43,13 +46,14 @@ export default function AssessmentEnvironment() {
 	const [executionResults, setExecutionResults] = useState(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
+	// --- PROCTORING & ONBOARDING STATES ---
+	const [setupStep, setSetupStep] = useState(1); // 1: Rules, 2: Mobile Link, 3: Verification
 	const [hasStarted, setHasStarted] = useState(false);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [warnings, setWarnings] = useState(0);
 	const [showWarningModal, setShowWarningModal] = useState(false);
 	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [violationMessage, setViolationMessage] = useState("");
-	const [toastMessage, setToastMessage] = useState("");
 	const [warningCountdown, setWarningCountdown] = useState(60);
 	const MAX_WARNINGS = 3;
 
@@ -57,6 +61,7 @@ export default function AssessmentEnvironment() {
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [isMobileDevice, setIsMobileDevice] = useState(false);
 	const [laptopStream, setLaptopStream] = useState(null);
+	const [toastMessage, setToastMessage] = useState("");
 
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
@@ -176,15 +181,15 @@ export default function AssessmentEnvironment() {
 		};
 	}, [isMobileDevice]);
 
-	// BIND VIDEO
+	// BIND VIDEO (Added setupStep dependency so it attaches correctly in Step 3)
 	useEffect(() => {
-		if (laptopVideoRef.current && laptopStream) {
+		if (laptopVideoRef.current && laptopStream && setupStep === 3) {
 			laptopVideoRef.current.srcObject = laptopStream;
 			laptopVideoRef.current
 				.play()
 				.catch((e) => console.error("Laptop Play Error:", e));
 		}
-	}, [laptopStream, hasStarted]);
+	}, [laptopStream, hasStarted, setupStep]);
 
 	// TEST DURATION TIMER
 	useEffect(() => {
@@ -242,6 +247,29 @@ export default function AssessmentEnvironment() {
 	}, [isDragging]);
 
 	// ==========================================
+	// PRE-TEST 5-SECOND MOBILE MONITOR
+	// ==========================================
+	useEffect(() => {
+		if (hasStarted) return;
+
+		// Checks every 5 seconds if the mobile connection dropped while in Step 3
+		const preTestPoller = setInterval(() => {
+			if (setupStep === 3 && !isMobileConnected) {
+				setSetupStep(2);
+				toast.error("⚠️ Mobile camera disconnected. Please reconnect.");
+			}
+		}, 5000);
+
+		// Instant fallback just in case the socket catches it before the 5s timer
+		if (setupStep === 3 && !isMobileConnected) {
+			setSetupStep(2);
+			toast.error("⚠️ Mobile camera disconnected. Please reconnect.");
+		}
+
+		return () => clearInterval(preTestPoller);
+	}, [setupStep, isMobileConnected, hasStarted]);
+
+	// ==========================================
 	// BULLETPROOF PROCTORING ENGINE
 	// ==========================================
 	const checkIsFullscreen = () => {
@@ -252,7 +280,6 @@ export default function AssessmentEnvironment() {
 			document.mozFullScreenElement ||
 			document.msFullscreenElement
 		);
-		// Increased margin to 15px to account for strict OS rounding and safe areas
 		const isPhysicallyFullscreen =
 			window.innerHeight >= window.screen.height - 15;
 		return isDOMFullscreen && isPhysicallyFullscreen;
@@ -271,7 +298,7 @@ export default function AssessmentEnvironment() {
 	const submitAssessment = async (isAutoSubmit = false) => {
 		if (isSubmittingRef.current) return;
 		isSubmittingRef.current = true;
-		setTimeLeft(0)
+		setTimeLeft(0);
 		setIsSubmitting(true);
 		setShowConfirmModal(false);
 
@@ -287,8 +314,8 @@ export default function AssessmentEnvironment() {
 			);
 
 			if (res) setHasStarted(false);
-			setToastMessage(
-				`✅ Assessment Submitted! Your score is: ${res.data.totalScore.toFixed(2)}`,
+			toast.success(
+				`Assessment Submitted! Your score is: ${res.data.totalScore.toFixed(2)}`,
 			);
 
 			if (socketRef.current) {
@@ -308,10 +335,7 @@ export default function AssessmentEnvironment() {
 			}, 2000);
 		} catch (error) {
 			if (!isAutoSubmit) {
-				setToastMessage(
-					"❌ Failed to submit assessment. Please try again.",
-				);
-				setTimeout(() => setToastMessage(""), 3000);
+				toast.error("Failed to submit assessment. Please try again.");
 			}
 			setIsSubmitting(false);
 			isSubmittingRef.current = false;
@@ -328,7 +352,7 @@ export default function AssessmentEnvironment() {
 		const currentWarnings = warningsRef.current;
 
 		setWarnings(currentWarnings);
-		setWarningCountdown(60); // Reset the 60s auto-submit timer
+		setWarningCountdown(60);
 		setViolationMessage(
 			currentWarnings >= MAX_WARNINGS
 				? `🚨 ${reason}. You reached 3 strikes.`
@@ -351,7 +375,6 @@ export default function AssessmentEnvironment() {
 				!hasStartedRef.current
 			)
 				return;
-
 			if (!checkIsFullscreen()) {
 				isFullscreenRef.current = false;
 				setIsFullscreen(false);
@@ -387,8 +410,7 @@ export default function AssessmentEnvironment() {
 			if (hasStartedRef.current && !showWarningModalRef.current) {
 				e.preventDefault();
 				e.stopPropagation();
-				setToastMessage("⚠️ Copying and Pasting is strictly disabled.");
-				setTimeout(() => setToastMessage(""), 3000);
+				toast.error("Copying and Pasting is strictly disabled.");
 			}
 		};
 
@@ -428,7 +450,7 @@ export default function AssessmentEnvironment() {
 	}, [hasStarted]);
 
 	// ==========================================
-	// THE FIX: SMART RETRY FULLSCREEN ENGINE
+	// SMART RETRY FULLSCREEN ENGINE
 	// ==========================================
 	const enterFullscreenAndExecute = (onSuccess, onFail) => {
 		const docElm = document.documentElement;
@@ -453,8 +475,6 @@ export default function AssessmentEnvironment() {
 							onSuccess();
 						} else if (attempts >= 15) {
 							clearInterval(verifyLoop);
-							// STRICT FALLBACK: We no longer accept fake DOM fullscreen.
-							// It MUST pass the physical check, otherwise we fail to prevent infinite strikes.
 							if (checkIsFullscreen()) {
 								onSuccess();
 							} else {
@@ -477,14 +497,13 @@ export default function AssessmentEnvironment() {
 	};
 
 	const startAssessment = async () => {
-		// CLEAR BUGGED STATE: If browser thinks it's fullscreen but physically isn't
 		if (
 			document.fullscreenElement &&
 			window.innerHeight < window.screen.height - 15
 		) {
 			try {
 				await exitFullscreen();
-			} catch (e) {}
+			} catch (e) {toast.error("Browser Blocked Fullscreen")}
 		}
 
 		enterFullscreenAndExecute(
@@ -494,15 +513,13 @@ export default function AssessmentEnvironment() {
 				isFullscreenRef.current = true;
 			},
 			(err) => {
-				setToastMessage(err);
-				setTimeout(() => setToastMessage(""), 3000);
+				toast.error("Some Error Occured");
+				
 			},
 		);
 	};
 
 	const handleAcknowledgeWarning = async () => {
-		// CLEAR BUGGED STATE: This is why tab switching fixed it.
-		// We manually clear the corrupted state here to force the OS to trigger the animation.
 		if (
 			document.fullscreenElement &&
 			window.innerHeight < window.screen.height - 15
@@ -520,8 +537,7 @@ export default function AssessmentEnvironment() {
 				setShowWarningModal(false);
 			},
 			(err) => {
-				setToastMessage(err);
-				setTimeout(() => setToastMessage(""), 3000);
+				toast.error("Some Error Occured");
 			},
 		);
 	};
@@ -590,115 +606,269 @@ export default function AssessmentEnvironment() {
 				</div>
 			)}
 
-			{/* 1. GATEWAY SCREEN */}
+			{/* 1. 3-PHASE GATEWAY SCREEN */}
 			<div
 				className={`min-h-screen bg-slate-950 text-white flex-col items-center justify-center p-4 md:p-8 ${!hasStarted ? "flex" : "hidden"}`}>
-				<div className="max-w-6xl w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl flex flex-col lg:flex-row gap-10">
-					{/* LEFT COLUMN: RULES */}
-					<div className="flex-1 flex flex-col justify-center">
-						<h1 className="text-4xl font-bold mb-4">{assessment.title}</h1>
-						<p className="text-slate-400 mb-8 text-lg">
-							{assessment.description}
-						</p>
-						<div className="bg-red-950/20 border border-red-900/50 p-6 rounded-xl text-left shadow-lg max-w-xl">
-							<h3 className="font-bold text-red-400 mb-3 flex items-center gap-2 text-lg">
-								⚠️ Strict Proctoring Rules
-							</h3>
-							<ul className="text-base text-slate-300 space-y-3 list-disc list-inside">
-								<li>Your browser will be locked into Fullscreen mode.</li>
-								<li>
-									<strong>
-										Do not switch tabs, minimize, or use virtual desktops.
-									</strong>{" "}
-									Doing so will result in an instant strike.
-								</li>
-								<li>
-									<strong>
-										Copying and Pasting is strictly disabled.
-									</strong>
-								</li>
-								<li>
-									<strong>
-										Your mobile phone camera must remain active
-									</strong>{" "}
-									to track your workspace.
-								</li>
-							</ul>
+				<div className="max-w-5xl w-full flex flex-col items-center">
+					{/* Step Indicators */}
+					<div className="flex items-center gap-4 mb-10 w-full max-w-2xl px-4">
+						<div
+							className={`flex flex-col items-center gap-2 ${setupStep >= 1 ? "text-blue-500" : "text-slate-600"}`}>
+							<div
+								className={`w-10 h-10 p-3 rounded-full flex items-center justify-center font-bold border-2 ${setupStep >= 1 ? "bg-blue-600/20 border-blue-500" : "border-slate-600"}`}>
+								1
+							</div>
+							<span className="text-xs font-bold uppercase tracking-wider">
+								Rules
+							</span>
+						</div>
+						<div
+							className={`flex-1 h-1 mb-4 rounded ${setupStep >= 2 ? "bg-blue-500" : "bg-slate-800"}`}></div>
+						<div
+							className={`flex flex-col items-center gap-2 ${setupStep >= 2 ? "text-blue-500" : "text-slate-600"}`}>
+							<div
+								className={`w-10 h-10 p-3 rounded-full flex items-center justify-center font-bold border-2 ${setupStep >= 2 ? "bg-blue-600/20 border-blue-500" : "border-slate-600"}`}>
+								2
+							</div>
+							<span className="text-xs font-bold uppercase tracking-wider">
+								Pairing
+							</span>
+						</div>
+						<div
+							className={`flex-1 h-1 mb-4 rounded ${setupStep >= 3 ? "bg-blue-500" : "bg-slate-800"}`}></div>
+						<div
+							className={`flex flex-col items-center gap-2 ${setupStep >= 3 ? "text-blue-500" : "text-slate-600"}`}>
+							<div
+								className={`w-10 h-10 p-3 rounded-full flex items-center justify-center font-bold border-2 ${setupStep >= 3 ? "bg-blue-600/20 border-blue-500" : "border-slate-600"}`}>
+								3
+							</div>
+							<span className="text-xs font-bold uppercase tracking-wider">
+								Verify
+							</span>
 						</div>
 					</div>
 
-					{/* RIGHT COLUMN: LARGE CAMERA PREVIEW & QR CODE */}
-					<div className="w-full lg:w-[450px] bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center shadow-inner">
-						<h3 className="font-bold text-white mb-3 flex items-center gap-2 text-lg">
-							<Camera size={22} className="text-blue-400" /> 1. Primary
-							Camera (Laptop)
-						</h3>
-						{/* LAPTOP CAMERA PREVIEW (LARGE) */}
-						<div className="w-full aspect-video bg-black rounded-xl overflow-hidden shadow-inner mb-6 relative border border-slate-700">
-							{laptopStream ? (
-								<video
-									ref={laptopVideoRef}
-									autoPlay
-									playsInline
-									muted
-									className="w-full h-full object-cover"
-									style={{ transform: "scaleX(-1)" }}
-								/>
-							) : (
-								<div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
-									<Loader2 className="animate-spin mb-2" /> Activating
-									Camera...
+					<div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-3xl shadow-2xl w-full transition-all duration-500">
+						{/* PHASE 1: RULES */}
+						{setupStep === 1 && (
+							<div className="flex flex-col items-center text-center animate-in fade-in slide-in-from-bottom-4">
+								<div className="w-16 h-16 bg-red-950/50 text-red-500 border border-red-900 rounded-full flex items-center justify-center mb-6">
+									<AlertTriangle size={32} />
 								</div>
-							)}
-							<div className="absolute top-3 left-3 bg-black/60 px-3 py-1 text-xs font-bold rounded-lg text-white flex items-center gap-2">
-								<div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{" "}
-								Active
+								<h1 className="text-3xl font-bold mb-4">
+									Environment Requirements
+								</h1>
+								<p className="text-slate-400 mb-8 max-w-lg">
+									This is a strictly proctored assessment. Ensure you are
+									in a quiet room before proceeding.
+								</p>
+
+								<div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 mb-8 text-left w-full max-w-xl">
+									<ul className="text-base text-slate-300 space-y-4">
+										<li className="flex items-start gap-3">
+											<Lock
+												className="text-blue-400 mt-1 shrink-0"
+												size={18}
+											/>
+											<span>
+												Your browser will be locked into{" "}
+												<b>Fullscreen mode</b>.
+											</span>
+										</li>
+										<li className="flex items-start gap-3">
+											<Lock
+												className="text-blue-400 mt-1 shrink-0"
+												size={18}
+											/>
+											<span>
+												<b>
+													Tab switching, minimizing, or virtual desktops
+												</b>{" "}
+												will result in instant strikes.
+											</span>
+										</li>
+										<li className="flex items-start gap-3">
+											<Lock
+												className="text-blue-400 mt-1 shrink-0"
+												size={18}
+											/>
+											<span>
+												<b>Copy/Paste</b> functionality is disabled.
+											</span>
+										</li>
+										<li className="flex items-start gap-3">
+											<Camera
+												className="text-red-400 mt-1 shrink-0"
+												size={18}
+											/>
+											<span>
+												Both your <b>Laptop & Mobile Camera</b> must remain
+												active.
+											</span>
+										</li>
+									</ul>
+								</div>
+								<button
+									onClick={() => setSetupStep(2)}
+									className="bg-blue-600 w-fit p-4 hover:bg-blue-500 text-white font-bold rounded-xl text-lg transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)]">
+									I Agree, Proceed to Setup <ChevronRight size={20} />
+								</button>
 							</div>
-						</div>
+						)}
 
-						<div className="w-full h-px bg-slate-800 mb-6"></div>
+						{/* PHASE 2: MOBILE PAIRING */}
+						{setupStep === 2 && (
+							<div className="flex flex-col items-center text-center animate-in fade-in slide-in-from-right-8">
+								<h1 className="text-3xl font-bold mb-2">
+									Link Secondary Device
+								</h1>
+								<p className="text-slate-400 mb-8 max-w-lg">
+									We use your mobile phone as a secondary camera to monitor
+									your workspace.
+								</p>
 
-						<h3 className="font-bold text-white mb-2 flex items-center gap-2 text-lg">
-							<Smartphone size={22} className="text-blue-400" /> 2.
-							Secondary Camera (Mobile)
-						</h3>
-						<p className="text-sm text-slate-400 mb-4 px-4 text-center">
-							Scan this QR code to activate the secondary view.
-						</p>
-						<div className="bg-white p-4 rounded-xl mb-6 shadow-md">
-							{pairingUrl ? (
-								<QRCodeSVG value={pairingUrl} size={150} />
-							) : (
-								<Loader2 className="animate-spin text-slate-800" />
-							)}
-						</div>
-
-						<div className="w-full mb-6">
-							{isMobileConnected ? (
-								<div className="bg-green-900/30 border border-green-500/50 text-green-400 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2">
-									<CheckCircle2 size={20} /> Device Linked!
+								<div className="bg-white p-6 rounded-2xl mb-6 shadow-xl relative">
+									{pairingUrl ? (
+										<QRCodeSVG value={pairingUrl} size={200} />
+									) : (
+										<div className="w-[200px] h-[200px] flex items-center justify-center">
+											<Loader2
+												className="animate-spin text-slate-800"
+												size={40}
+											/>
+										</div>
+									)}
 								</div>
-							) : (
-								<div className="bg-yellow-900/20 border border-yellow-500/50 text-yellow-500 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2">
-									<Loader2 size={18} className="animate-spin" /> Waiting
-									for Mobile...
-								</div>
-							)}
-						</div>
 
-						<button
-							onClick={startAssessment}
-							disabled={!isMobileConnected || !laptopStream}
-							className={`w-full font-bold py-4 rounded-xl text-xl transition-all ${isMobileConnected && laptopStream ? "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]" : "bg-slate-800 text-slate-500 cursor-not-allowed"}`}>
-							{!laptopStream
-								? "Waiting for Camera..."
-								: "Start Assessment"}
-						</button>
+								<div className="mb-8 h-12 flex items-center justify-center">
+									{isMobileConnected ? (
+										<div className="bg-green-900/30 border border-green-500/50 text-green-400 font-bold py-3 px-6 rounded-xl flex items-center gap-3 animate-in fade-in zoom-in duration-300">
+											<CheckCircle2 size={24} /> Mobile Device Successfully
+											Paired!
+										</div>
+									) : (
+										<div className="bg-yellow-900/20 border border-yellow-500/50 text-yellow-500 font-bold py-3 px-6 rounded-xl flex items-center gap-3">
+											<Loader2 size={20} className="animate-spin" />{" "}
+											Waiting for device scan...
+										</div>
+									)}
+								</div>
+
+								<div className="flex gap-4">
+									<button
+										onClick={() => setSetupStep(1)}
+										className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-4 px-8 rounded-xl transition-all">
+										Back
+									</button>
+									<button
+										onClick={() => setSetupStep(3)}
+										disabled={!isMobileConnected}
+										className={`font-bold p-4 rounded-xl text-lg transition-all flex items-center gap-2 ${isMobileConnected ? "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
+										Verify Cameras <ChevronRight size={20} />
+									</button>
+								</div>
+							</div>
+						)}
+
+						{/* PHASE 3: CAMERA VERIFICATION */}
+						{setupStep === 3 && (
+							<div className="flex flex-col items-center animate-in fade-in slide-in-from-right-8 w-full">
+								<h1 className="text-3xl font-bold mb-2">
+									Final Verification
+								</h1>
+								<p className="text-slate-400 mb-8 text-center max-w-lg">
+									Please ensure your face is visible on your laptop and
+									your mobile device is propped up to show your hands.
+								</p>
+
+								<div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl mb-10">
+									{/* LAPTOP FEED */}
+									<div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl flex flex-col items-center shadow-inner">
+										<h3 className="font-bold text-slate-300 mb-3 flex items-center gap-2">
+											<Camera size={18} className="text-blue-400" />{" "}
+											Primary Camera (Laptop)
+										</h3>
+										<div className="w-full aspect-video bg-black rounded-xl overflow-hidden relative border border-slate-700">
+											{laptopStream ? (
+												<video
+													ref={laptopVideoRef}
+													autoPlay
+													playsInline
+													muted
+													className="w-full h-full object-cover"
+													style={{ transform: "scaleX(-1)" }}
+												/>
+											) : (
+												<div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
+													<Loader2 className="animate-spin mb-2" />{" "}
+													Activating...
+												</div>
+											)}
+											<div className="absolute top-3 left-3 bg-black/60 px-3 py-1 text-xs font-bold rounded-lg text-white flex items-center gap-2">
+												<div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{" "}
+												Tracking Active
+											</div>
+										</div>
+									</div>
+
+									{/* MOBILE FEED (Verified Status) */}
+									<div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl flex flex-col items-center shadow-inner">
+										<h3 className="font-bold text-slate-300 mb-3 flex items-center gap-2">
+											<Smartphone size={18} className="text-purple-400" />{" "}
+											Secondary Camera (Mobile)
+										</h3>
+										<div className="w-full aspect-video bg-slate-900 border-2 border-dashed border-slate-700 p-4 mt-8 rounded-xl flex flex-col items-center justify-center relative">
+											{isMobileConnected ? (
+												<>
+													<div className="w-16 h-16 bg-green-900/20 text-green-500 rounded-full flex items-center justify-center mb-4 border border-green-500/30">
+														<CheckCircle2 size={32} />
+													</div>
+													<span className="font-bold text-green-400 text-lg">
+														Stream Linked Successfully
+													</span>
+													<span className="text-xs text-slate-500 mt-2 font-medium bg-slate-800 px-3 py-1 rounded-full">
+														Preview visible on mobile device
+													</span>
+												</>
+											) : (
+												<>
+													<div className="w-16 h-16 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4 border border-red-500/30 animate-pulse">
+														<AlertTriangle size={32} />
+													</div>
+													<span className="font-bold text-red-400 text-lg">
+														Connection Lost
+													</span>
+													<span className="text-xs text-slate-500 mt-2 font-medium bg-slate-800 px-3 py-1 rounded-full">
+														Redirecting to pairing...
+													</span>
+												</>
+											)}
+										</div>
+									</div>
+								</div>
+
+								<div className="flex gap-4 w-full justify-center">
+									<button
+										onClick={() => setSetupStep(2)}
+										className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-4 px-8 rounded-xl transition-all">
+										Back
+									</button>
+									<button
+										onClick={startAssessment}
+										disabled={!laptopStream || !isMobileConnected}
+										className={`font-bold p-4 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
+										{laptopStream && isMobileConnected
+											? "Start Assessment"
+											: "Waiting for Cameras..."}
+									</button>
+								</div>
+							</div>
+						)}
 					</div>
 				</div>
 			</div>
 
-			{/* 2. RED SCREEN OF DEATH */}
+			{/* 2. RED SCREEN OF DEATH (UPDATED BUTTON UI) */}
 			<div
 				className={`min-h-screen bg-red-950 text-white flex-col items-center justify-center p-8 text-center relative z-[99999] ${showWarningModal || (!isFullscreen && hasStarted) ? "flex" : "hidden"}`}>
 				<AlertTriangle
@@ -738,21 +908,34 @@ export default function AssessmentEnvironment() {
 						</div>
 					</div>
 				) : (
-					<>
+					<div className="flex flex-col items-center w-full max-w-xl">
 						<p className="text-2xl font-bold text-slate-300 mb-2">
 							Strike{" "}
 							<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
 							{MAX_WARNINGS}
 						</p>
-						<div className="text-xl font-bold animate-pulse text-red-300 mb-6">
+						<div className="text-xl font-bold animate-pulse text-red-300 mb-8">
 							Auto-submitting in {warningCountdown}s if ignored...
 						</div>
+
+						{/* THE NEW "PRETTY" I UNDERSTAND BUTTON */}
 						<button
 							onClick={handleAcknowledgeWarning}
-							className="bg-blue-600 text-white font-black w-full p-[2em] rounded-xl text-xl hover:bg-blue-500 hover:scale-105 transition-all shadow-[0_0_30px_rgba(37,99,235,0.6)] border border-blue-400 cursor-pointer flex items-center justify-center">
-							I Understand. Return to Test in Fullscreen.
+							className="group relative w-fit flex justify-center py-5 px-8 border-2 border-blue-400 text-xl font-black rounded-2xl text-white bg-gradient-to-r from-blue-700 to-blue-500 hover:from-blue-600 hover:to-blue-400 focus:outline-none shadow-[0_0_40px_rgba(37,99,235,0.6)] transform transition-all hover:scale-105 active:scale-95 overflow-hidden">
+							<div className="absolute inset-0 w-full h-full bg-white/10 group-hover:bg-transparent transition-colors"></div>
+							<span className="flex items-center p-3 gap-3 relative z-10">
+								<ShieldCheck
+									size={28}
+									className=" text-blue-200"
+								/>
+								I Understand, Return to Test
+							</span>
 						</button>
-					</>
+						<p className="text-slate-500 text-sm mt-4">
+							Clicking this will automatically restore your fullscreen
+							session.
+						</p>
+					</div>
 				)}
 			</div>
 
