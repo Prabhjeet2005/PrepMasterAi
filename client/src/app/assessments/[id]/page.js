@@ -377,26 +377,22 @@ export default function AssessmentEnvironment() {
 		}
 	};
 
-	const handleAcknowledgeWarning = async () => {
-		try {
+const handleAcknowledgeWarning = async () => {
+	try {
+		if (!checkIsFullscreen()) {
 			await requestFullscreen();
-			setTimeout(() => {
-				if (checkIsFullscreen()) {
-					setShowWarningModal(false);
-					setViolationMessage("");
-					setIsFullscreen(true);
-					isFullscreenRef.current = true;
-				} else {
-					setToastMessage(
-						"Browser blocked request. Please click 'I Understand' again.",
-					);
-					setTimeout(() => setToastMessage(""), 3000);
-				}
-			}, 400);
-		} catch (e) {
-			console.error("Could not return to fullscreen", e);
 		}
-	};
+		setShowWarningModal(false);
+		setViolationMessage("");
+		setIsFullscreen(true);
+		isFullscreenRef.current = true;
+	} catch (e) {
+		setToastMessage(
+			"Browser blocked request. Click anywhere on the background, then click 'I Understand'.",
+		);
+		console.error("Fullscreen error:", e);
+	}
+};
 
 	const submitAssessment = async (isAutoSubmit = false) => {
 		if (isSubmittingRef.current) return;
@@ -498,7 +494,7 @@ useEffect(() => {
 					audio: true,
 				});
 				laptopStreamRef.current = stream;
-				setLaptopStream(stream); // TRIGGER RENDER
+				setLaptopStream(stream);
 			} catch (err) {
 				handleViolation("Laptop Camera/Mic access is mandatory.");
 			}
@@ -512,15 +508,12 @@ useEffect(() => {
 	};
 }, [hasStarted]);
 
-// FORCE VIDEO PLAY
+// BUG 3 FIX: Industry standard video binding
 useEffect(() => {
 	if (laptopVideoRef.current && laptopStream) {
 		laptopVideoRef.current.srcObject = laptopStream;
-		laptopVideoRef.current
-			.play()
-			.catch((e) => console.error("Laptop Video error:", e));
 	}
-}, [laptopStream]);
+}, [laptopStream, hasStarted]);
 
 	if (loading || authLoading)
 		return (
@@ -708,17 +701,12 @@ if (showWarningModal || !isFullscreen) {
 				{hasStarted && (
 					<div className="fixed bottom-6 right-6 z-[9999] w-48 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 pointer-events-none">
 						<video
-							autoPlay
-							playsInline
-							muted
+							ref={laptopVideoRef}
+							autoPlay={true}
+							playsInline={true}
+							muted={true}
 							className="w-full h-full object-cover"
 							style={{ transform: "scaleX(-1)" }}
-							ref={(node) => {
-								if (node && laptopStream) {
-									node.srcObject = laptopStream;
-									node.play().catch(() => {});
-								}
-							}}
 						/>
 						<div className="absolute top-2 right-2 bg-red-600 w-2.5 h-2.5 rounded-full animate-pulse"></div>
 					</div>
