@@ -56,6 +56,8 @@ export default function AssessmentEnvironment() {
 	// --- NEW: MULTI-DEVICE STATES ---
 	const [isMobileConnected, setIsMobileConnected] = useState(false);
 	const [pairingUrl, setPairingUrl] = useState("");
+	const [isMobileDevice, setIsMobileDevice] = useState(false);
+	const [laptopStream, setLaptopStream] = useState(null);
 
 	// --- REFS ---
 	const codeRef = useRef(code);
@@ -68,6 +70,7 @@ export default function AssessmentEnvironment() {
 	const socketRef = useRef(null); // Keep track of the socket
 
 	const laptopVideoRef = useRef(null);
+	const laptopStreamRef = useRef(null);
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -84,6 +87,15 @@ export default function AssessmentEnvironment() {
 	useEffect(() => {
 		showWarningModalRef.current = showWarningModal;
 	}, [showWarningModal]);
+
+	useEffect(() => {
+		// Detect if the user is on a phone/tablet
+		const checkMobile =
+			/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+				navigator.userAgent,
+			);
+		setIsMobileDevice(checkMobile);
+	}, []);
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 	const [leftPanelWidth, setLeftPanelWidth] = useState(50);
@@ -141,6 +153,16 @@ export default function AssessmentEnvironment() {
 		socket.on("mobile_connected", () => {
 			console.log("Mobile device paired successfully!");
 			setIsMobileConnected(true);
+		});
+
+		socket.on("mobile_disconnected", () => {
+			console.log("Mobile device disconnected!");
+			setIsMobileConnected(false);
+			if (hasStartedRef.current) {
+				handleViolation(
+					"Mobile camera disconnected! Test environment compromised.",
+				);
+			}
 		});
 
 		// Listen for Strikes triggered by the Phone Camera
@@ -401,6 +423,18 @@ export default function AssessmentEnvironment() {
 				`✅ Assessment Submitted! Your score is: ${res.data.totalScore.toFixed(2)}`,
 			);
 
+			// --- BUG 3 FIX: Tell Mobile to close session ---
+			if (socketRef.current) {
+				const roomId = `${id}-${authUser._id}`;
+				socketRef.current.emit("end_proctoring_session", roomId);
+			}
+
+			if (laptopStreamRef.current) {
+				laptopStreamRef.current
+					.getTracks()
+					.forEach((track) => track.stop());
+			}
+
 			setTimeout(async () => {
 				if (checkIsFullscreen()) await exitFullscreen();
 				router.push("/assessments");
@@ -454,49 +488,39 @@ export default function AssessmentEnvironment() {
 	// ==========================================
 	// START LAPTOP WEBCAM WHEN TEST STARTS
 	// ==========================================
+
 useEffect(() => {
 	if (hasStarted) {
 		const startLaptopCamera = async () => {
 			try {
-				if (
-					!navigator.mediaDevices ||
-					!navigator.mediaDevices.getUserMedia
-				) {
-					console.error("Camera API blocked by browser.");
-					handleViolation(
-						"Browser blocked camera. Please use secure context.",
-					);
-					return;
-				}
-
 				const stream = await navigator.mediaDevices.getUserMedia({
 					video: true,
 					audio: true,
 				});
-
-				if (laptopVideoRef.current) {
-					laptopVideoRef.current.srcObject = stream;
-					// CRITICAL FIX: Explicitly play the video
-					laptopVideoRef.current
-						.play()
-						.catch((e) => console.error("Laptop video play error:", e));
-				}
+				laptopStreamRef.current = stream;
+				setLaptopStream(stream); // TRIGGER RENDER
 			} catch (err) {
-				console.error("Laptop camera access denied:", err);
 				handleViolation("Laptop Camera/Mic access is mandatory.");
 			}
 		};
 		startLaptopCamera();
 	}
-
 	return () => {
-		if (laptopVideoRef.current && laptopVideoRef.current.srcObject) {
-			laptopVideoRef.current.srcObject
-				.getTracks()
-				.forEach((track) => track.stop());
+		if (laptopStreamRef.current) {
+			laptopStreamRef.current.getTracks().forEach((track) => track.stop());
 		}
 	};
 }, [hasStarted]);
+
+// FORCE VIDEO PLAY
+useEffect(() => {
+	if (laptopVideoRef.current && laptopStream) {
+		laptopVideoRef.current.srcObject = laptopStream;
+		laptopVideoRef.current
+			.play()
+			.catch((e) => console.error("Laptop Video error:", e));
+	}
+}, [laptopStream]);
 
 	if (loading || authLoading)
 		return (
@@ -505,6 +529,19 @@ useEffect(() => {
 			</div>
 		);
 	if (!assessment) return null;
+
+	if (isMobileDevice) {
+		return (
+			<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
+				<AlertTriangle size={64} className="text-red-500 mb-4" />
+				<h1 className="text-2xl font-bold mb-2">Desktop Required</h1>
+				<p className="text-slate-400">
+					Assessments must be taken on a Laptop or Desktop computer. Mobile
+					devices are only used as secondary proctoring cameras.
+				</p>
+			</div>
+		);
+	}
 
 	// ==========================================
 	// 1. RE-DESIGNED MULTI-DEVICE GATEWAY SCREEN
@@ -597,53 +634,61 @@ useEffect(() => {
 	}
 
 	// 2. RED SCREEN OF DEATH
-	if (showWarningModal || !isFullscreen) {
-		return (
-			<div className="min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-8 text-center relative">
-				{toastMessage && (
-					<div className="absolute top-10 bg-red-600 px-6 py-3 rounded-xl font-bold shadow-2xl animate-bounce">
-						{toastMessage}
-					</div>
-				)}
-
-				<AlertTriangle
-					size={80}
-					className="text-red-500 mb-6 animate-pulse"
-				/>
-				<h1 className="text-5xl font-black text-white mb-4 tracking-tight">
-					PROCTORING WARNING
-				</h1>
-				<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
-					<p className="text-xl text-red-100 font-bold">
-						{violationMessage || "You are out of fullscreen mode."}
-					</p>
-				</div>
-
-				{warnings >= MAX_WARNINGS ? (
-					<div className="text-xl font-bold animate-pulse text-red-300">
-						Auto-Submitting Assessment...
-					</div>
-				) : (
-					<>
-						<p className="text-2xl font-bold text-slate-300 mb-2">
-							Strike{" "}
-							<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
-							{MAX_WARNINGS}
-						</p>
-						<p className="text-slate-400 mb-10 max-w-md mx-auto">
-							If you continue to violate proctoring rules, your test will
-							be automatically terminated.
-						</p>
-						<button
-							onClick={handleAcknowledgeWarning}
-							className="bg-white text-red-900 font-black px-10 py-5 rounded-xl text-xl hover:bg-slate-200 transition-transform hover:scale-105 shadow-2xl">
-							I Understand. Return to Test in Fullscreen.
-						</button>
-					</>
-				)}
+if (showWarningModal || !isFullscreen) {
+	return (
+		<div className="min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-8 text-center relative">
+			<AlertTriangle
+				size={80}
+				className="text-red-500 mb-6 animate-pulse"
+			/>
+			<h1 className="text-5xl font-black text-white mb-4 tracking-tight">
+				PROCTORING WARNING
+			</h1>
+			<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
+				<p className="text-xl text-red-100 font-bold">
+					{violationMessage || "You are out of fullscreen mode."}
+				</p>
 			</div>
-		);
-	}
+
+			{warnings >= MAX_WARNINGS ? (
+				<div className="text-xl font-bold animate-pulse text-red-300">
+					Auto-Submitting Assessment...
+				</div>
+			) : !isMobileConnected ? (
+				// BUG 1 FIX: If mobile is disconnected, they CANNOT proceed.
+				<div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 flex flex-col items-center max-w-md shadow-2xl">
+					<h3 className="text-2xl font-bold text-red-400 mb-2">
+						Secondary Camera Missing!
+					</h3>
+					<p className="text-slate-300 mb-6 text-sm">
+						Your mobile device disconnected. You cannot return to the
+						assessment until it is re-linked.
+					</p>
+					<div className="bg-white p-4 rounded-xl mb-4 shadow-lg">
+						<QRCodeSVG value={pairingUrl} size={140} />
+					</div>
+					<div className="flex items-center gap-2 text-yellow-500 font-bold animate-pulse">
+						<Loader2 size={18} className="animate-spin" /> Waiting for
+						Mobile...
+					</div>
+				</div>
+			) : (
+				<>
+					<p className="text-2xl font-bold text-slate-300 mb-2">
+						Strike{" "}
+						<span className="text-red-500 text-3xl">{warnings}</span> of{" "}
+						{MAX_WARNINGS}
+					</p>
+					<button
+						onClick={handleAcknowledgeWarning}
+						className="bg-white text-red-900 font-black px-10 py-5 rounded-xl text-xl hover:bg-slate-200 transition-transform hover:scale-105 shadow-2xl">
+						I Understand. Return to Test in Fullscreen.
+					</button>
+				</>
+			)}
+		</div>
+	);
+}
 
 	const currentMcq = assessment.mcqs[currentMcqIndex];
 	const currentDsa = assessment.dsaQuestions[0];
@@ -660,17 +705,24 @@ useEffect(() => {
 				)}
 
 				{/* --- FLOATING LAPTOP WEBCAM (Picture-in-Picture) --- */}
-				<div className="fixed bottom-6 right-6 z-[9999] w-48 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 pointer-events-none">
-					<video
-						ref={laptopVideoRef}
-						autoPlay
-						playsInline
-						muted // Mute it so the user doesn't hear their own echo
-						className="w-full h-full object-cover"
-						style={{ transform: "scaleX(-1)" }}
-					/>
-					<div className="absolute top-2 right-2 bg-red-600 w-2.5 h-2.5 rounded-full animate-pulse"></div>
-				</div>
+				{hasStarted && (
+					<div className="fixed bottom-6 right-6 z-[9999] w-48 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 pointer-events-none">
+						<video
+							autoPlay
+							playsInline
+							muted
+							className="w-full h-full object-cover"
+							style={{ transform: "scaleX(-1)" }}
+							ref={(node) => {
+								if (node && laptopStream) {
+									node.srcObject = laptopStream;
+									node.play().catch(() => {});
+								}
+							}}
+						/>
+						<div className="absolute top-2 right-2 bg-red-600 w-2.5 h-2.5 rounded-full animate-pulse"></div>
+					</div>
+				)}
 
 				{/* TOP NAVIGATION BAR */}
 				<div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-20">

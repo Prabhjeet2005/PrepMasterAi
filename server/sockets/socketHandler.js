@@ -139,9 +139,9 @@ const setupSocket = (io) => {
 		// 2. Mobile device joins the room
 		socket.on("mobile_join_room", (roomId) => {
 			socket.join(roomId);
+			socket.proctorRoomId = roomId; // TAG THE SOCKET
+			socket.isMobile = true; // MARK AS MOBILE
 			console.log(`[Proctor Socket] Mobile joined room: ${roomId}`);
-
-			// Tell the laptop that the mobile device successfully connected!
 			socket.to(roomId).emit("mobile_connected");
 		});
 
@@ -154,8 +154,22 @@ const setupSocket = (io) => {
 			socket.to(roomId).emit("trigger_laptop_strike", reason);
 		});
 
+		// 4. Laptop ends the session completely
+		socket.on("end_proctoring_session", (roomId) => {
+			console.log(`[Proctor Socket] Session ended for room: ${roomId}`);
+			socket.to(roomId).emit("proctoring_ended");
+		});
+
 		socket.on("disconnect", () => {
 			console.log("❌ Client Disconnected");
+
+			if (socket.isMobile && socket.proctorRoomId) {
+				console.log(
+					`[Proctor Socket] Mobile dropped in room: ${socket.proctorRoomId}`,
+				);
+				socket.to(socket.proctorRoomId).emit("mobile_disconnected");
+			}
+
 			if (deepgramLive) {
 				deepgramLive.finish();
 				deepgramLive = null;

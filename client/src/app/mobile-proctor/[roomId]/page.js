@@ -8,12 +8,14 @@ import {
 	ShieldAlert,
 	Loader2,
 	Camera,
+	Flag,
 } from "lucide-react";
 
 export default function MobileProctorPage() {
 	const { roomId } = useParams();
-	const [status, setStatus] = useState("connecting"); // connecting, paired, error
-	const videoRef = useRef(null);
+	const [status, setStatus] = useState("connecting"); // connecting, paired, error, completed
+	const [mediaStream, setMediaStream] = useState(null);
+	const streamRef = useRef(null);
 
 	useEffect(() => {
 		const socket = io(process.env.NEXT_PUBLIC_API_URL);
@@ -21,70 +23,50 @@ export default function MobileProctorPage() {
 		socket.on("connect", () => {
 			socket.emit("mobile_join_room", roomId);
 			setStatus("paired");
-			startCamera(); // Start camera as soon as paired
 		});
 
-		socket.on("connect_error", () => {
-			setStatus("error");
+		socket.on("connect_error", () => setStatus("error"));
+
+		// BUG 3 FIX: Listen for the test ending
+		socket.on("proctoring_ended", () => {
+			setStatus("completed");
+			if (streamRef.current) {
+				streamRef.current.getTracks().forEach((track) => track.stop()); // Kill camera instantly
+			}
 		});
 
-		// WAKE LOCK: Force the phone screen to stay awake
 		const requestWakeLock = async () => {
 			try {
-				if ("wakeLock" in navigator) {
+				if ("wakeLock" in navigator)
 					await navigator.wakeLock.request("screen");
-				}
-			} catch (err) {
-				console.error("Wake Lock failed:", err);
-			}
+			} catch (err) {}
 		};
 		requestWakeLock();
 
 		return () => {
 			socket.disconnect();
-			// Turn off camera when leaving
-			if (videoRef.current && videoRef.current.srcObject) {
-				videoRef.current.srcObject
-					.getTracks()
-					.forEach((track) => track.stop());
-			}
+			if (streamRef.current)
+				streamRef.current.getTracks().forEach((track) => track.stop());
 		};
 	}, [roomId]);
 
-	// --- HARDWARE ACCESS ---
-	const startCamera = async () => {
-		try {
-			if (
-				!navigator.mediaDevices ||
-				!navigator.mediaDevices.getUserMedia
-			) {
-				setStatus("error");
-				alert(
-					"Camera API blocked. Please use Chrome with the security flag enabled.",
-				);
-				return;
-			}
-
-			const stream = await navigator.mediaDevices.getUserMedia({
-				video: { facingMode: "user" },
-				audio: false,
-			});
-
-			if (videoRef.current) {
-				videoRef.current.srcObject = stream;
-				// CRITICAL FIX: Explicitly tell the video element to play the stream
-				videoRef.current
-					.play()
-					.catch((e) => console.error("Video play error:", e));
-			}
-		} catch (err) {
-			console.error("Camera access denied:", err);
-			setStatus("error");
-			alert(
-				"Camera access was denied. Please check your browser permissions and refresh.",
-			);
+	useEffect(() => {
+		if (status === "paired") {
+			const startCamera = async () => {
+				try {
+					const stream = await navigator.mediaDevices.getUserMedia({
+						video: { facingMode: "user" },
+						audio: false,
+					});
+					streamRef.current = stream;
+					setMediaStream(stream);
+				} catch (err) {
+					setStatus("error");
+				}
+			};
+			startCamera();
 		}
-	};
+	}, [status]);
 
 	return (
 		<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
@@ -94,9 +76,6 @@ export default function MobileProctorPage() {
 					<h1 className="text-2xl font-bold mb-2">
 						Connecting to Laptop...
 					</h1>
-					<p className="text-slate-400">
-						Please wait while we establish a secure connection.
-					</p>
 				</div>
 			)}
 
@@ -106,44 +85,51 @@ export default function MobileProctorPage() {
 						<CheckCircle2 size={20} /> Securely Linked to Assessment
 					</div>
 
-					{/* LIVE CAMERA FEED */}
 					<div className="relative w-full aspect-[3/4] bg-black rounded-3xl overflow-hidden border-4 border-slate-800 shadow-2xl mb-8">
+						{/* BUG 2 FIX: The Callback Ref guarantees the video attaches perfectly */}
 						<video
-							ref={videoRef}
 							autoPlay
 							playsInline
 							muted
 							className="absolute inset-0 w-full h-full object-cover mirror"
-							style={{ transform: "scaleX(-1)" }} // Mirrors the video so it feels natural
+							style={{ transform: "scaleX(-1)" }}
+							ref={(node) => {
+								if (node && mediaStream) {
+									node.srcObject = mediaStream;
+									node.play().catch(() => {});
+								}
+							}}
 						/>
 						<div className="absolute top-4 left-4 bg-black/50 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2 text-xs font-bold border border-white/10">
 							<div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
 							PROCTORING ACTIVE
 						</div>
 					</div>
+				</div>
+			)}
 
-					<div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full text-left shadow-xl">
-						<h3 className="font-bold text-blue-400 mb-3 flex items-center gap-2">
-							<Camera size={20} /> Positioning Rules
-						</h3>
-						<ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
-							<li>Prop your phone up on your desk.</li>
-							<li>
-								Ensure your <b>face, hands, and laptop screen</b> are
-								clearly visible.
-							</li>
-							<li>Do not lock your phone screen.</li>
-						</ul>
+			{/* BUG 3 FIX: The Completed Screen */}
+			{status === "completed" && (
+				<div className="flex flex-col items-center animate-in fade-in zoom-in duration-500">
+					<div className="w-24 h-24 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center mb-6 border border-green-500/50">
+						<Flag size={48} />
 					</div>
+					<h1 className="text-3xl font-black mb-2 text-white">
+						Assessment Ended
+					</h1>
+					<p className="text-slate-300">
+						Your proctoring session is successfully closed. You can now
+						lock your phone.
+					</p>
 				</div>
 			)}
 
 			{status === "error" && (
 				<div className="flex flex-col items-center">
 					<ShieldAlert size={64} className="text-red-500 mb-6" />
-					<h1 className="text-2xl font-bold mb-2">Connection Failed</h1>
+					<h1 className="text-2xl font-bold mb-2">Camera Access Denied</h1>
 					<p className="text-slate-400">
-						Please rescan the QR code on your laptop.
+						Please check your browser permissions.
 					</p>
 				</div>
 			)}
