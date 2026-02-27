@@ -5,6 +5,9 @@ import { io } from "socket.io-client";
 import { CheckCircle2, ShieldAlert, Loader2, Flag } from "lucide-react";
 
 let faceapi;
+let tf; 
+let cocoSsd; 
+let handPoseDetection;
 
 export default function MobileProctorPage() {
 	const { roomId } = useParams();
@@ -14,7 +17,20 @@ export default function MobileProctorPage() {
 	const streamRef = useRef(null);
 	const videoRef = useRef(null);
 	const socketRef = useRef(null);
-	const faceScanIntervalRef = useRef(null); // ADD THIS
+	const faceScanIntervalRef = useRef(null);
+	const objectDetectorRef = useRef(null);
+	const handModelRef = useRef(null);
+	const missingHandsTimerRef = useRef(0);
+	const isGracePeriodRef = useRef(true);
+
+	// Disarm the grace period 3 seconds after successfully pairing
+	useEffect(() => {
+		if (status === "paired") {
+			setTimeout(() => {
+				isGracePeriodRef.current = false;
+			}, 3000);
+		}
+	}, [status]);
 
 	useEffect(() => {
 		socketRef.current = io(process.env.NEXT_PUBLIC_API_URL);
@@ -49,30 +65,30 @@ export default function MobileProctorPage() {
 	}, [roomId]);
 
 	// INSTANT KILL ON BACKGROUNDING
-useEffect(() => {
-	const handleVisibilityChange = () => {
-		// THE FIX: Only trigger if the document is completely hidden (swapped apps or minimized)
-		if (document.hidden && status === "paired" && socketRef.current) {
-			socketRef.current.emit("mobile_violation_detected", {
-				roomId,
-				reason: "Mobile browser minimized or backgrounded.",
-			});
-			if (streamRef.current)
-				streamRef.current.getTracks().forEach((track) => track.stop());
-			socketRef.current.disconnect();
-			setStatus("disconnected");
-		}
-	};
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			// THE FIX: Only trigger if the document is completely hidden (swapped apps or minimized)
+			if (document.hidden && status === "paired" && socketRef.current && !isGracePeriodRef.current) {
+        socketRef.current.emit("mobile_violation_detected", {
+          roomId,
+          reason: "Mobile browser minimized or backgrounded.",
+        });
+        if (streamRef.current)
+          streamRef.current.getTracks().forEach((track) => track.stop());
+        socketRef.current.disconnect();
+        setStatus("disconnected");
+      }
+		};
 
-	document.addEventListener("visibilitychange", handleVisibilityChange);
+		document.addEventListener("visibilitychange", handleVisibilityChange);
 
-	return () => {
-		document.removeEventListener(
-			"visibilitychange",
-			handleVisibilityChange,
-		);
-	};
-}, [status, roomId]);
+		return () => {
+			document.removeEventListener(
+				"visibilitychange",
+				handleVisibilityChange,
+			);
+		};
+	}, [status, roomId]);
 
 	// START CAMERA
 	useEffect(() => {
@@ -119,63 +135,194 @@ useEffect(() => {
 	// ==========================================
 	// MOBILE AI: FACE DESCRIPTOR GENERATOR
 	// ==========================================
-useEffect(() => {
-	const loadModels = async () => {
-		try {
-			if (!faceapi) {
-				const module = await import("@vladmandic/face-api");
-				// Safely handle Next.js ESM dynamic module exports
-				faceapi = module.default || module;
+	useEffect(() => {
+		const loadModels = async () => {
+			try {
+				if (!faceapi) {
+					const module = await import("@vladmandic/face-api");
+					faceapi = module.default || module;
+				}
+
+				// NEW: Load TensorFlow and COCO-SSD dynamically for SSR safety
+				if (!cocoSsd) {
+					tf = await import("@tensorflow/tfjs");
+					await tf.ready(); // Initializes the WebGL backend
+					const cocoModule = await import("@tensorflow-models/coco-ssd");
+					cocoSsd = cocoModule.default || cocoModule;
+				}
+
+				if (!handPoseDetection) {
+					const hpdModule =
+						await import("@tensorflow-models/hand-pose-detection");
+					handPoseDetection = hpdModule.default || hpdModule;
+				}
+
+				const MODEL_URL =
+					"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+				await Promise.all([
+					faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+					faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+					faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+				]);
+
+				// NEW: Load the Object Detection Model
+				objectDetectorRef.current = await cocoSsd.load();
+
+				const handModel = handPoseDetection.SupportedModels.MediaPipeHands;
+				const detectorConfig = {
+					runtime: "tfjs",
+					modelType: "full",
+					maxHands: 2, // THIS IS THE MAGIC BULLET!
+				};
+				handModelRef.current = await handPoseDetection.createDetector(
+					handModel,
+					detectorConfig,
+				);
+
+				console.log("✅ Mobile AI Identity & Object Models Loaded");
+			} catch (e) {
+				console.error("Mobile Model load error", e);
 			}
-			const MODEL_URL =
-				"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
-			await Promise.all([
-				faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-				faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-				faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-			]);
-			console.log("✅ Mobile AI Identity Models Loaded");
-		} catch (e) {
-			console.error("Mobile Model load error", e);
-		}
-	};
-	loadModels();
-}, []);
+		};
+		loadModels();
+	}, []);
 
 	useEffect(() => {
 		if (status !== "paired" || !mediaStream || !videoRef.current) return;
 
 		const video = videoRef.current;
+		let isScanning = false;
 
-		// Scan every 3 seconds to save mobile battery while maintaining security
-		faceScanIntervalRef.current = setInterval(async () => {
-			if (video.paused || video.ended || !socketRef.current) return;
-
-			// Detect the single largest face in the mobile view
-			const detection = await faceapi
-				.detectSingleFace(
-					video,
-					new faceapi.TinyFaceDetectorOptions({
-						inputSize: 224,
-						scoreThreshold: 0.5,
-					}),
-				)
-				.withFaceLandmarks()
-				.withFaceDescriptor();
-
-			if (detection) {
-				// Convert Float32Array to standard array so it can survive WebSocket JSON serialization
-				const descriptorArray = Array.from(detection.descriptor);
-				socketRef.current.emit("send_mobile_face_descriptor", {
-					roomId,
-					descriptor: descriptorArray,
-				});
+		// Recursive function to handle the AI scan
+		const runAiScan = async () => {
+			if (
+				video.paused ||
+				video.ended ||
+				!socketRef.current ||
+				isScanning
+			) {
+				scheduleNextScan(3000); // Retry soon if busy
+				return;
 			}
-		}, 3000);
 
+			isScanning = true;
+
+			// CRITICAL FIX: TFJS requires explicit DOM width/height attributes
+			if (!video.width && video.videoWidth) {
+				video.width = video.videoWidth;
+				video.height = video.videoHeight;
+			}
+
+			// Default to standard random polling to save battery (10s to 15s)
+			let nextDelay =
+				Math.floor(Math.random() * (12000 - 5000 + 1)) + 10000;
+
+			// =====================================
+			// 1. FACE IDENTITY SCANNER
+			// =====================================
+			try {
+				if (faceapi) {
+					const detection = await faceapi
+						.detectSingleFace(
+							video,
+							new faceapi.TinyFaceDetectorOptions({
+								inputSize: 224,
+								scoreThreshold: 0.5,
+							}),
+						)
+						.withFaceLandmarks()
+						.withFaceDescriptor();
+
+					if (detection) {
+						socketRef.current.emit("send_mobile_face_descriptor", {
+							roomId,
+							descriptor: Array.from(detection.descriptor),
+						});
+					}
+				}
+			} catch (err) {
+				console.warn("Face AI Skipped this tick:", err.message);
+			}
+
+			// =====================================
+			// 2. FORBIDDEN OBJECT SCANNER
+			// =====================================
+			try {
+				if (objectDetectorRef.current) {
+					const predictions =
+						await objectDetectorRef.current.detect(video);
+					const forbiddenItems = ["cell phone", "book", "remote"];
+
+					const violation = predictions.find((p) => {
+						if (!forbiddenItems.includes(p.class)) return false;
+						const requiredConfidence =
+							p.class === "cell phone" || p.class === "remote" ? 0.3 : 0.5;
+						return p.score > requiredConfidence;
+					});
+
+					if (violation) {
+						socketRef.current.emit("mobile_violation_detected", {
+							roomId,
+							reason: `Forbidden object detected: ${violation.class}`,
+						});
+					}
+				}
+			} catch (err) {
+				console.warn("Object AI Skipped this tick:", err.message);
+			}
+
+			// =====================================
+			// 3. HAND TRACKING (DYNAMIC FAST-POLLING)
+			// =====================================
+			try {
+				if (handModelRef.current) {
+					const hands = await handModelRef.current.estimateHands(video);
+					console.log(`[AI] Hands currently visible: ${hands.length}`);
+
+					if (hands.length < 2) {
+						missingHandsTimerRef.current += 1;
+
+						// 3 strikes in fast-poll mode = ~4.5 seconds of missing hands
+						if (missingHandsTimerRef.current >= 3) {
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"Both hands must remain fully visible on the desk area.",
+							});
+							missingHandsTimerRef.current = 0;
+						} else {
+							// THE FIX: Anomaly detected! Drop the delay to 1.5 seconds to rapid-verify!
+							nextDelay = 1500;
+							console.warn(
+								`[AI] Suspicious activity! Verifying hands again in 1.5s... (Attempt ${missingHandsTimerRef.current}/3)`,
+							);
+						}
+					} else {
+						// Hands are visible. Reset the strike counter and let it go back to the 15s sleep.
+						missingHandsTimerRef.current = 0;
+					}
+				}
+			} catch (err) {
+				console.warn("Hand AI Skipped this tick:", err.message);
+			}
+
+			// Unlock and schedule the next sweep using our dynamic delay
+			isScanning = false;
+			scheduleNextScan(nextDelay);
+		};
+
+		// Accepts a dynamic delay parameter
+		const scheduleNextScan = (delay) => {
+			if (status !== "paired") return;
+			faceScanIntervalRef.current = setTimeout(runAiScan, delay);
+		};
+
+		// Kick off the very first scan after 5 seconds
+		faceScanIntervalRef.current = setTimeout(runAiScan, 5000);
 		return () => {
+			// Changed clearInterval to clearTimeout since we switched architectures
 			if (faceScanIntervalRef.current)
-				clearInterval(faceScanIntervalRef.current);
+				clearTimeout(faceScanIntervalRef.current);
 		};
 	}, [status, mediaStream, roomId]);
 

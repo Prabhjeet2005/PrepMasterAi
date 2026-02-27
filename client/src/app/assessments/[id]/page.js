@@ -28,6 +28,7 @@ import {
 import toast from "react-hot-toast";
 
 let faceapi;
+let cocoSsd;
 
 const CPP_BOILERPLATE = `#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    ios_base::sync_with_stdio(false);\n    cin.tie(NULL);\n    \n    // Write your logic here...\n    \n    return 0;\n}`;
 
@@ -57,6 +58,7 @@ export default function AssessmentEnvironment() {
 	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [violationMessage, setViolationMessage] = useState("");
 	const [warningCountdown, setWarningCountdown] = useState(60);
+
 	const MAX_WARNINGS = 300;
 
 	const [isMobileConnected, setIsMobileConnected] = useState(false);
@@ -67,7 +69,9 @@ export default function AssessmentEnvironment() {
 
 	const [isAiReady, setIsAiReady] = useState(false);
 	const [isVerifying, setIsVerifying] = useState(false);
+	const [isAiLoadingDelay, setIsAiLoadingDelay] = useState(false);
 
+	
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -76,15 +80,26 @@ export default function AssessmentEnvironment() {
 	const isSubmittingRef = useRef(isSubmitting);
 	const showWarningModalRef = useRef(showWarningModal);
 	const socketRef = useRef(null);
-
+	
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
 	const warningsRef = useRef(0);
-
+	
 	const faceDetectionIntervalRef = useRef(null);
 	const lookAwayTimerRef = useRef(0);
 	const anchorDescriptorRef = useRef(null); // Stores the original face identity
 	const latestMobileDescriptorRef = useRef(null);
+	const laptopObjectDetectorRef = useRef(null);
+	
+	// Triggers a 5-second lock on the Step 3 button when they enter the step
+	useEffect(() => {
+		if (setupStep === 3) {
+			setIsAiLoadingDelay(true);
+			const timer = setTimeout(() => setIsAiLoadingDelay(false), 5000);
+			return () => clearTimeout(timer);
+		}
+	}, [setupStep]);
+
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -314,8 +329,15 @@ useEffect(() => {
 		try {
 			if (!faceapi) {
 				const module = await import("@vladmandic/face-api");
-				// Safely handle Next.js ESM dynamic module exports
 				faceapi = module.default || module;
+			}
+
+			// ✅ ADD THIS BLOCK
+			if (!cocoSsd) {
+				const tf = await import("@tensorflow/tfjs");
+				await tf.ready();
+				const cocoModule = await import("@tensorflow-models/coco-ssd");
+				cocoSsd = cocoModule.default || cocoModule;
 			}
 
 			const MODEL_URL =
@@ -325,7 +347,11 @@ useEffect(() => {
 				faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
 				faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
 			]);
-			console.log("✅ Local Browser AI Vision & Identity Loaded");
+
+			// ✅ ADD THIS LINE
+			laptopObjectDetectorRef.current = await cocoSsd.load();
+
+			console.log("✅ Local Browser AI Vision & Object Detection Loaded");
 			setIsAiReady(true);
 		} catch (err) {
 			console.error("AI Model Load Error:", err);
@@ -384,6 +410,22 @@ useEffect(() => {
 						"Identity mismatch! Different person detected on laptop camera.",
 					);
 				}
+			}
+		}
+
+		if (laptopObjectDetectorRef.current) {
+			const predictions =
+				await laptopObjectDetectorRef.current.detect(video);
+			const forbiddenItems = ["cell phone", "book"]; // Only looking for obvious cheating items held up to the screen
+
+			const violation = predictions.find(
+				(p) => forbiddenItems.includes(p.class) && p.score > 0.5,
+			);
+
+			if (violation) {
+				handleViolation(
+					`Forbidden object detected on screen camera: ${violation.class}`,
+				);
 			}
 		}
 	}, 1500);
@@ -620,6 +662,7 @@ useEffect(() => {
 			}, 1000);
 		}
 	};
+
 
 	const startAssessment = async () => {
 		if (!faceapi) {
@@ -1048,13 +1091,21 @@ useEffect(() => {
 									<button
 										onClick={startAssessment}
 										disabled={
-											!laptopStream || !isMobileConnected || isVerifying
+											!laptopStream ||
+											!isMobileConnected ||
+											isVerifying ||
+											isAiLoadingDelay
 										}
-										className={`font-bold p-4 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected && !isVerifying ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
+										className={`font-bold py-4 px-12 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected && !isVerifying && !isAiLoadingDelay ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
 										{isVerifying ? (
 											<>
 												<Loader2 className="animate-spin" size={20} />{" "}
 												Verifying...
+											</>
+										) : isAiLoadingDelay ? (
+											<>
+												<Loader2 className="animate-spin" size={20} />{" "}
+												Initializing AI...
 											</>
 										) : !laptopStream || !isMobileConnected ? (
 											"Waiting for Cameras..."
