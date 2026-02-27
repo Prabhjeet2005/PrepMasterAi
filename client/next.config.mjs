@@ -10,6 +10,16 @@ const nextConfig = {
 		};
 		return config;
 	},
+	// ✅ FIX: Tell Turbopack to apply the exact same fallbacks for production!
+	experimental: {
+		turbopack: {
+			resolveFallback: {
+				fs: false,
+				path: false,
+				crypto: false,
+			},
+		},
+	},
 };
 
 export default nextConfig;
