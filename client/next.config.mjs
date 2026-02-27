@@ -26,21 +26,6 @@ const nextConfig = {
 		}
 		return config;
 	},
-
-	experimental: {
-		turbopack: {
-			// 3. Point Turbopack to our fake module
-			resolveAlias: {
-				"@mediapipe/hands": "./src/mock-mediapipe.js",
-			},
-			// 4. Ignore Node native modules in Turbopack
-			resolveFallback: {
-				fs: false,
-				path: false,
-				crypto: false,
-			},
-		},
-	},
 };
 
 export default nextConfig;
