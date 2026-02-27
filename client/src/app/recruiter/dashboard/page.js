@@ -34,6 +34,7 @@ export default function RecruiterDashboard() {
 
 	const [searchQuery, setSearchQuery] = useState("");
 	const [sortBy, setSortBy] = useState("newest");
+	const [imageLoading, setImageLoading] = useState(true);
 
 	useEffect(() => {
 		if (!authLoading) {
@@ -357,9 +358,10 @@ export default function RecruiterDashboard() {
 															</div>
 															{log.evidence && (
 																<button
-																	onClick={() =>
-																		setSelectedEvidence(log.evidence)
-																	}
+																	onClick={() => {
+																		setImageLoading(true);
+																		setSelectedEvidence(log.evidence);
+																	}}
 																	className="text-xs font-bold bg-blue-900/30 text-blue-400 border border-blue-900 hover:bg-blue-900/50 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
 																	<Camera size={14} /> View Evidence
 																</button>
@@ -412,10 +414,24 @@ export default function RecruiterDashboard() {
 						</div>
 
 						<div className="border-4 border-slate-800 rounded-2xl rounded-tl-none overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] bg-black w-full">
+							{/* ✅ FIX: Glowing Loading Spinner */}
+							{imageLoading && (
+								<div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-10">
+									<Loader2
+										className="animate-spin text-blue-500 mb-4"
+										size={48}
+									/>
+									<span className="text-slate-400 font-bold animate-pulse">
+										Decrypting Evidence...
+									</span>
+								</div>
+							)}
+
 							<img
 								src={selectedEvidence}
 								alt="Violation Evidence"
-								className="w-full h-auto max-h-[80vh] object-contain"
+								onLoad={() => setImageLoading(false)} // ✅ Hide loader when done!
+								className={`w-full h-auto max-h-[80vh] object-contain transition-opacity duration-500 ${imageLoading ? "opacity-0" : "opacity-100"}`}
 							/>
 						</div>
 					</div>

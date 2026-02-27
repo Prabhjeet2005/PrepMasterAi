@@ -3,6 +3,7 @@ const aiService = require('../services/ai.service.js'); // Import the adapter
 const Interview = require("../models/interview.model.js");
 const pdf = require("pdf-extraction"); // NEW LIBRARY
 const fs = require("fs");
+const { uploadPDFBuffer } = require("../utils/cloudinary");
 
 const extractTextFromPDF = async (buffer) => {
 	try {
@@ -28,10 +29,16 @@ const extractTextFromPDF = async (buffer) => {
 const startInterviewController = async (req, res) => {
 	try {
 		let resumeText = "";
+		let securePdfUrl = null;
 
 		// OPTION A: File Uploaded
 		if (req.file) {
 			resumeText = await extractTextFromPDF(req.file.buffer);
+
+			// ✅ FIX: Bypassing Cloudinary's strict PDF firewalls.
+			// We convert the tiny PDF directly into a Base64 string that the browser can read instantly!
+			securePdfUrl = `data:application/pdf;base64,${req.file.buffer.toString("base64")}`;
+			console.log("✅ PDF converted to Base64 Data URI.");
 		}
 		// OPTION B: No File (For testing)
 		else {
@@ -69,6 +76,15 @@ const startInterviewController = async (req, res) => {
 		// 4. Initialize Chat with the REAL User ID
 		const userId = req.user._id.toString(); // <--- Get ID from the bouncer
 		const response = await aiService.startChat(userId, systemInstruction);
+
+		// ✅ FIX: Attach the Cloudinary PDF URL to the newly created Interview document
+		if (securePdfUrl) {
+			await Interview.findOneAndUpdate(
+				{ userId: req.user._id, status: "active" }, // Find the interview just created by aiService
+				{ resumeUrl: securePdfUrl }, // Attach the PDF URL
+				{ sort: { createdAt: -1 } }, // Ensure it's the latest one
+			);
+		}
 
 		// Send back the message AND the userId so the frontend knows what ID to use for sockets
 		res.json({ message: response, userId: userId });

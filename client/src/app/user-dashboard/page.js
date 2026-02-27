@@ -14,6 +14,7 @@ import {
 	Video,
 	ChevronLeft,
 	ChevronRight,
+	Eye,Download,FileText,X
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -34,6 +35,7 @@ export default function UserDashboardPage() {
 	const [activeTab, setActiveTab] = useState("interviews"); // 'interviews' or 'assessments'
 	const [interviewPage, setInterviewPage] = useState(1);
 	const [assessmentPage, setAssessmentPage] = useState(1);
+	const [selectedResumeUrl, setSelectedResumeUrl] = useState(null);
 	const ITEMS_PER_PAGE = 6;
 
 	// --- DATA STATES ---
@@ -201,7 +203,7 @@ export default function UserDashboardPage() {
 		<div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 print:bg-slate-950 print:text-white print:color-adjust-exact">
 			<div className="max-w-6xl mx-auto mt-8">
 				{/* HEADER & TABS */}
-				<div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-10 gap-6">
+				<div className="flex flex-col lg:flex-row justify-between items-center mb-10 gap-6">
 					<div>
 						<h1 className="text-3xl font-bold text-white mb-2">
 							Your Dashboard
@@ -211,7 +213,7 @@ export default function UserDashboardPage() {
 						</p>
 					</div>
 
-					<div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
+					<div className="flex flex-col xl:flex-row items-center gap-4 w-full lg:w-auto">
 						{/* TAB TOGGLES */}
 						<div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 w-full sm:w-auto">
 							<button
@@ -341,44 +343,74 @@ export default function UserDashboardPage() {
 									{paginatedInterviews.map((interview) => (
 										<div
 											key={interview._id}
-											className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all group flex flex-col relative">
-											<button
-												onClick={() =>
-													handleDeleteInterview(interview._id)
-												}
-												className="absolute top-4 right-4 text-slate-500 hover:text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors z-10"
-												title="Delete Interview">
-												<Trash2 size={18} />
-											</button>
-											<div className="flex items-center gap-2 text-slate-400 text-sm font-medium mb-6">
-												<Calendar size={16} />
-												{formatDate(interview.createdAt)}
-											</div>
-											<div
-												className={`px-4 py-2 rounded-xl text-center font-black text-xl border mb-6 ${interview.feedback?.overallScore >= 80 ? "bg-green-900/30 text-green-400 border-green-500/30" : interview.feedback?.overallScore >= 60 ? "bg-yellow-900/30 text-yellow-400 border-yellow-500/30" : "bg-red-900/30 text-red-400 border-red-500/30"}`}>
-												{interview.feedback?.overallScore || 0} / 10
-											</div>
-											<div className="space-y-3 mb-8 flex-1">
-												<div className="flex justify-between text-sm">
-													<span className="text-slate-400">Technical</span>
-													<span className="font-bold text-slate-200">
-														{interview.feedback?.technicalAccuracy || 0}
-														/10
+											className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 hover:border-slate-700 transition-all group flex flex-col h-full shadow-lg">
+											{/* ✅ RESPONSIVE FIX: Flex header instead of absolute positioning */}
+											<div className="flex flex-wrap-reverse justify-between items-start gap-3 mb-6">
+												<div className="flex items-center gap-2 text-slate-400 text-sm font-medium mt-1">
+													<Calendar size={16} className="shrink-0" />
+													<span className="whitespace-nowrap">
+														{formatDate(interview.createdAt)}
 													</span>
 												</div>
-												<div className="flex justify-between text-sm">
+
+												<div className="flex items-center gap-2 self-end sm:self-auto ml-auto">
+													{interview.resumeUrl && (
+														<button
+															onClick={() =>
+																setSelectedResumeUrl(interview.resumeUrl)
+															}
+															className="flex items-center gap-1.5 text-xs font-bold bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-lg transition-all shadow-md whitespace-nowrap"
+															title="View Original Resume PDF">
+															<Eye size={14} />
+															<span className="hidden sm:inline">
+																View Resume
+															</span>
+															<span className="sm:hidden">Resume</span>
+														</button>
+													)}
+
+													<button
+														onClick={() =>
+															handleDeleteInterview(interview._id)
+														}
+														className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 p-1.5 sm:p-2 rounded-lg transition-colors bg-slate-950 border border-slate-800 shrink-0"
+														title="Delete Interview">
+														<Trash2 size={16} />
+													</button>
+												</div>
+											</div>
+
+											<div
+												className={`px-4 py-3 rounded-xl text-center font-black text-2xl border mb-6 shadow-inner ${interview.feedback?.overallScore >= 80 ? "bg-green-900/20 text-green-400 border-green-500/20" : interview.feedback?.overallScore >= 60 ? "bg-yellow-900/20 text-yellow-400 border-yellow-500/20" : "bg-red-900/20 text-red-400 border-red-500/20"}`}>
+												{interview.feedback?.overallScore || 0}{" "}
+												<span className="text-sm opacity-50 font-bold">
+													/ 10
+												</span>
+											</div>
+
+											<div className="space-y-3 mb-8 flex-1">
+												<div className="flex justify-between items-center text-sm border-b border-slate-800/50 pb-2">
+													<span className="text-slate-400">
+														Technical Accuracy
+													</span>
+													<span className="font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-md">
+														{interview.feedback?.technicalAccuracy || 0}/10
+													</span>
+												</div>
+												<div className="flex justify-between items-center text-sm">
 													<span className="text-slate-400">
 														Communication
 													</span>
-													<span className="font-bold text-slate-200">
+													<span className="font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-md">
 														{interview.feedback?.communicationSkills || 0}
 														/10
 													</span>
 												</div>
 											</div>
+
 											<Link
 												href={`/user-dashboard/${interview._id}`}
-												className="w-full py-3 bg-slate-800 group-hover:bg-slate-700 rounded-xl text-sm font-bold text-slate-300 transition-colors flex justify-center items-center gap-2">
+												className="w-full p-4 bg-slate-800 group-hover:bg-blue-600 rounded-xl text-sm font-bold text-slate-300 group-hover:text-white transition-all flex justify-center items-center gap-2 shadow-md mt-auto">
 												View Detailed Feedback <ArrowRight size={16} />
 											</Link>
 										</div>
@@ -508,32 +540,35 @@ export default function UserDashboardPage() {
 									{paginatedAssessments.map((result) => (
 										<div
 											key={result._id}
-											className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all group flex flex-col relative">
-											<div className="flex items-center justify-between mb-4">
-												<div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-													<Calendar size={16} />
-													{formatDate(result.createdAt)}
+											className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 hover:border-slate-700 transition-all group flex flex-col h-full shadow-lg">
+											{/* ✅ RESPONSIVE FIX: Flex-wrap allows the score badge to drop below the date on tiny screens */}
+											<div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+												<div className="flex items-center gap-2 text-slate-400 text-sm font-medium mt-1">
+													<Calendar size={16} className="shrink-0" />
+													<span className="whitespace-nowrap">
+														{formatDate(result.createdAt)}
+													</span>
 												</div>
-												<div className="text-xs font-bold bg-slate-800 text-purple-400 border border-purple-500/30 px-3 py-1 rounded-full">
+												<div className="text-xs font-bold bg-purple-900/20 text-purple-400 border border-purple-500/30 px-3 py-1.5 rounded-full shrink-0 shadow-sm ml-auto sm:ml-0">
 													Score: {result.totalScore?.toFixed(2)}
 												</div>
 											</div>
 
-											<h3 className="text-lg font-bold text-white mb-6 line-clamp-2">
+											<h3 className="text-lg font-bold text-white mb-6 line-clamp-2 min-h-[56px]">
 												{result.assessmentId?.title ||
 													"Deleted Assessment"}
 											</h3>
 
 											<div className="space-y-3 mb-8 flex-1">
-												<div className="flex justify-between text-sm">
+												<div className="flex justify-between items-center text-sm border-b border-slate-800/50 pb-2">
 													<span className="text-slate-400">MCQ Score</span>
-													<span className="font-bold text-slate-200">
+													<span className="font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-md">
 														{result.mcqScore || 0}
 													</span>
 												</div>
-												<div className="flex justify-between text-sm">
+												<div className="flex justify-between items-center text-sm">
 													<span className="text-slate-400">DSA Score</span>
-													<span className="font-bold text-slate-200">
+													<span className="font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-md">
 														{result.dsaScore
 															? result.dsaScore.toFixed(2)
 															: 0}
@@ -543,7 +578,7 @@ export default function UserDashboardPage() {
 
 											<Link
 												href={`/user-dashboard/assessment/${result._id}`}
-												className="w-full py-3 bg-slate-800 group-hover:bg-slate-700 rounded-xl text-sm font-bold text-slate-300 transition-colors flex justify-center items-center gap-2">
+												className="w-full py-3 sm:py-3.5 bg-slate-800 group-hover:bg-purple-600 rounded-xl text-sm font-bold text-slate-300 group-hover:text-white transition-all flex justify-center items-center gap-2 shadow-md mt-auto">
 												View Code & Results <ArrowRight size={16} />
 											</Link>
 										</div>
@@ -581,6 +616,52 @@ export default function UserDashboardPage() {
 					</>
 				)}
 			</div>
+
+			{/* ✅ NEW: RESUME PDF VIEWER MODAL */}
+			{selectedResumeUrl && (
+				<div
+					className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 lg:p-8"
+					onClick={() => setSelectedResumeUrl(null)}>
+					<div
+						className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden"
+						onClick={(e) => e.stopPropagation()}>
+						{/* Modal Header */}
+						<div className="p-4 md:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 shrink-0">
+							<div className="flex items-center gap-3 text-white font-bold text-lg md:text-xl">
+								<div className="p-2 bg-blue-600/20 rounded-lg border border-blue-500/30 text-blue-400">
+									<FileText size={20} />
+								</div>
+								Candidate Resume Reference
+							</div>
+							<div className="flex items-center gap-3 md:gap-4">
+								<a
+									href={selectedResumeUrl}
+									download="Candidate_Resume.pdf"
+									className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-xl text-sm font-bold transition-colors border border-slate-700 shadow-md">
+									<Download size={16} />{" "}
+									<span className="hidden md:inline">Download</span>
+								</a>
+								<button
+									onClick={() => setSelectedResumeUrl(null)}
+									className="p-2 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white rounded-xl transition-colors border border-slate-700">
+									<X size={20} />
+								</button>
+							</div>
+						</div>
+
+						{/* Modal Body - PDF Iframe */}
+						<div className="flex-1 w-full h-full bg-slate-950/50 p-2 md:p-6">
+							<div className="flex-1 w-full h-full bg-slate-950/50 p-2 md:p-6">
+								<iframe
+									src={`${selectedResumeUrl}#toolbar=0`}
+									className="w-full h-full rounded-xl border border-slate-800 bg-white shadow-inner"
+									title="Resume PDF Viewer"
+								/>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
