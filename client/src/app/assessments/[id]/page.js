@@ -71,6 +71,7 @@ export default function AssessmentEnvironment() {
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [isAiLoadingDelay, setIsAiLoadingDelay] = useState(false);
 	const [isCalibratingAudio, setIsCalibratingAudio] = useState(false);
+	const [violationSource, setViolationSource] = useState("laptop");
 
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
@@ -84,9 +85,11 @@ export default function AssessmentEnvironment() {
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
 	const warningsRef = useRef(0);
+	const proctoringLogsRef = useRef([]);
 
 	const faceDetectionIntervalRef = useRef(null);
 	const lookAwayTimerRef = useRef(0);
+	const identityMismatchTimerRef = useRef(0); 
 	const anchorDescriptorRef = useRef(null); // Stores the original face identity
 	const latestMobileDescriptorRef = useRef(null);
 	const laptopObjectDetectorRef = useRef(null);
@@ -95,6 +98,9 @@ export default function AssessmentEnvironment() {
 	const analyserRef = useRef(null);
 	const audioThresholdRef = useRef(35); // Default fallback threshold
 	const audioStrikeTimerRef = useRef(0);
+
+	const mobileIdentityTimerRef = useRef(0);
+	const multipleFacesTimerRef = useRef(0);
 
 	// Triggers a 5-second lock on the Step 3 button when they enter the step
 	useEffect(() => {
@@ -146,7 +152,7 @@ export default function AssessmentEnvironment() {
 
 					// THE FIX: Increased the safety margin to +20, and raised the cap to 80
 					// to easily accommodate noisy environments without false-flagging.
-					const customThreshold = Math.min(avgBaseline + 30, 120);
+					const customThreshold = Math.min(avgBaseline + 20, 100);
 					audioThresholdRef.current = customThreshold;
 
 					console.log(
@@ -232,19 +238,35 @@ export default function AssessmentEnvironment() {
 		});
 
 		socket.on("mobile_disconnected", () => {
-			// THE FIX: Wait 10 seconds before declaring it officially disconnected.
-			// Mobile networks and backgrounded Safari tabs often drop sockets for 1-2 seconds.
+			// ✅ FIX: Increased to 20 seconds to survive aggressive mobile network throttling
 			disconnectTimer = setTimeout(() => {
 				setIsMobileConnected(false);
 				if (hasStartedRef.current) {
 					handleViolation(
 						"Mobile camera disconnected! Test environment compromised.",
+						null,
+						"system",
 					);
 				}
-			}, 10000);
+			}, 20000);
 		});
-		socket.on("trigger_laptop_strike", (reason) => {
-			handleViolation(`Mobile Proctor Alert: ${reason}`);
+
+		socket.on("trigger_laptop_strike", (payload) => {
+			const reason =
+				typeof payload === "string" ? payload : payload.reason;
+			const evidence =
+				typeof payload === "string" ? null : payload.evidence;
+
+			// ✅ FIX: Intercept Soft Warnings from mobile and fire a Toast instead of a Strike!
+			if (reason.includes("SOFT_WARNING:")) {
+				toast.error(
+					`⚠️ Mobile Alert: ${reason.split("SOFT_WARNING: ")[1]}`,
+					{ id: "mobile-soft", duration: 4000 },
+				);
+				return; // Abort here so it DOES NOT trigger a Red Screen Strike!
+			}
+
+			handleViolation(reason, evidence, "mobile");
 		});
 
 		socket.on("mobile_face_descriptor", (mobileDescriptorArray) => {
@@ -265,10 +287,25 @@ export default function AssessmentEnvironment() {
 				anchorDescriptorRef.current,
 				mobileDescriptor,
 			);
-			if (distance > 0.65) {
-				handleViolation(
-					"Identity mismatch! Unauthorized person detected on the mobile camera.",
-				);
+			// ✅ FIX: Added the exact same Leniency & Soft Warning logic to the Mobile camera!
+			if (distance > 0.75) {
+				mobileIdentityTimerRef.current += 1;
+
+				if (mobileIdentityTimerRef.current === 2) {
+					toast.error(
+						"⚠️ Mobile Alert: Unauthorized person detected. Please ensure only you are in the frame.",
+						{ id: "mobile-id-soft", duration: 4000 },
+					);
+				} else if (mobileIdentityTimerRef.current >= 4) {
+					handleViolation(
+						"Identity mismatch! Unauthorized person detected on the mobile camera.",
+						null,
+						"mobile",
+					);
+					mobileIdentityTimerRef.current = 0;
+				}
+			} else {
+				mobileIdentityTimerRef.current = 0;
 			}
 		});
 
@@ -442,7 +479,7 @@ export default function AssessmentEnvironment() {
 					video,
 					new faceapi.TinyFaceDetectorOptions({
 						inputSize: 224,
-						scoreThreshold: 0.5,
+						scoreThreshold: 0.2,
 					}),
 				)
 				.withFaceLandmarks()
@@ -451,17 +488,41 @@ export default function AssessmentEnvironment() {
 			const faceCount = detections.length;
 
 			if (faceCount === 0) {
+				multipleFacesTimerRef.current = 0; // ✅ Reset multiple face timer
 				lookAwayTimerRef.current += 1;
-				if (lookAwayTimerRef.current >= 3) {
+
+				if (lookAwayTimerRef.current === 3) {
+					toast.error(
+						"⚠️ Face not detected. Please ensure your face is clearly visible.",
+						{ id: "face-missing-warning", duration: 3000 },
+					);
+				}
+
+				if (lookAwayTimerRef.current >= 6) {
 					handleViolation("Candidate's face is not visible in the frame.");
 					lookAwayTimerRef.current = 0;
 				}
 			} else if (faceCount > 1) {
-				handleViolation(
-					"Multiple faces detected! Unauthorized assistance suspected.",
-				);
 				lookAwayTimerRef.current = 0;
+				multipleFacesTimerRef.current += 1;
+
+				// ✅ FIX: Only strike if the AI consistently sees a second face for ~3 seconds
+				if (multipleFacesTimerRef.current >= 2) {
+					const canvas = document.createElement("canvas");
+					canvas.width = video.videoWidth;
+					canvas.height = video.videoHeight;
+					const ctx = canvas.getContext("2d");
+					ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+					const evidence = canvas.toDataURL("image/jpeg", 0.5);
+
+					handleViolation(
+						"Multiple faces detected! Unauthorized assistance suspected.",
+						evidence,
+					);
+					multipleFacesTimerRef.current = 0;
+				}
 			} else if (faceCount === 1) {
+				multipleFacesTimerRef.current = 0; // ✅ Reset multiple face timer
 				lookAwayTimerRef.current = 0;
 
 				// 1. Identity Check
@@ -470,10 +531,29 @@ export default function AssessmentEnvironment() {
 						anchorDescriptorRef.current,
 						detections[0].descriptor,
 					);
-					if (distance > 0.65) {
-						handleViolation(
-							"Identity mismatch! Different person detected on laptop camera.",
-						);
+
+					// ✅ FIX: Increased threshold to 0.75 to tolerate tilted heads
+					if (distance > 0.75) {
+						identityMismatchTimerRef.current += 1;
+
+						// Fire a soft, on-screen warning toast after 2 ticks (~3 seconds)
+						if (identityMismatchTimerRef.current === 2) {
+							toast.error("⚠️ Please look directly at the screen.", {
+								id: "look-warning",
+								duration: 3000,
+							});
+						}
+
+						// Only fire a REAL strike after 4 consecutive ticks (~6 seconds)
+						if (identityMismatchTimerRef.current >= 4) {
+							handleViolation(
+								"Identity mismatch! Different person detected on laptop camera.",
+							);
+							identityMismatchTimerRef.current = 0;
+						}
+					} else {
+						// Instantly forgive them if they look back at the screen
+						identityMismatchTimerRef.current = 0;
 					}
 				}
 
@@ -511,28 +591,23 @@ export default function AssessmentEnvironment() {
 					currentVoiceLevel = voiceSum / 16;
 					const backgroundNoiseLevel = noiseSum / noiseBinCount;
 
-					// THE FIX: Increased to +35. The vocal sound must be MASSIVELY louder than the room noise to trigger.
-					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 35;
+					// ✅ FIX: Lowered SNR from +18 to +8. Whispers barely stand out from background noise, so we must be strict.
+					// ✅ FIX: Increased SNR to +20. Broad-spectrum crashes (like plates) will be filtered out.
+					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 20;
 				}
 
-				if (
-					currentVoiceLevel > audioThresholdRef.current &&
-					isVoiceDominant &&
-					!isLipsMoving
-				) {
+				if (currentVoiceLevel > audioThresholdRef.current && isVoiceDominant && !isLipsMoving) {
 					audioStrikeTimerRef.current += 1;
 
-					// THE FIX: Increased from 4 to 6 sweeps (approx 9 full seconds of continuous talking with closed lips)
+					// ✅ FIX: Increased to 6 sweeps (~9 seconds). A plate dropping won't last 9 seconds.
 					if (audioStrikeTimerRef.current >= 6) {
-						handleViolation(
-							"Unusual background audio detected while lips were closed. Off-camera assistance suspected.",
-						);
+						handleViolation("Continuous background audio detected while lips were closed. Off-camera assistance suspected.");
 						audioStrikeTimerRef.current = 0;
 					}
 				} else {
-					audioStrikeTimerRef.current = 0;
+					// Decrease by 1 so pauses between human words don't clear their strike timer!
+					audioStrikeTimerRef.current = Math.max(0, audioStrikeTimerRef.current - 1);
 				}
-
 			}
 
 			if (laptopObjectDetectorRef.current) {
@@ -545,8 +620,34 @@ export default function AssessmentEnvironment() {
 				);
 
 				if (violation) {
+					// ✅ FIX: Draw the red box on the laptop camera
+					const canvas = document.createElement("canvas");
+					canvas.width = video.videoWidth;
+					canvas.height = video.videoHeight;
+					const ctx = canvas.getContext("2d");
+					ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+					ctx.strokeStyle = "red";
+					ctx.lineWidth = 4;
+					ctx.strokeRect(
+						violation.bbox[0],
+						violation.bbox[1],
+						violation.bbox[2],
+						violation.bbox[3],
+					);
+					ctx.fillStyle = "red";
+					ctx.font = "bold 18px Arial";
+					ctx.fillText(
+						violation.class.toUpperCase(),
+						violation.bbox[0],
+						violation.bbox[1] - 8,
+					);
+
+					const evidence = canvas.toDataURL("image/jpeg", 0.5);
+
 					handleViolation(
 						`Forbidden object detected on screen camera: ${violation.class}`,
+						evidence,
 					);
 				}
 			}
@@ -598,10 +699,16 @@ export default function AssessmentEnvironment() {
 				: mcqAnswers;
 			const res = await axios.post(
 				`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${id}/submit`,
-				{ mcqAnswers: finalAnswers, code: finalCode, language: "cpp" },
+				{
+					mcqAnswers: finalAnswers,
+					code: finalCode,
+					language: "cpp",
+					warnings: warningsRef.current,
+					proctoringLogs: proctoringLogsRef.current,
+				},
 				{ withCredentials: true },
 			);
-
+			setTimeLeft(0);
 			if (res) setHasStarted(false);
 			toast.success(
 				`Assessment Submitted! Your score is: ${res.data.totalScore.toFixed(2)}`,
@@ -631,7 +738,7 @@ export default function AssessmentEnvironment() {
 		}
 	};
 
-	const handleViolation = (reason) => {
+	const handleViolation = (reason, evidenceImage = null, source = "laptop") => {
 		if (isSubmittingRef.current || showWarningModalRef.current) return;
 		const now = Date.now();
 		if (now - lastViolationTime.current < 2000) return;
@@ -640,8 +747,15 @@ export default function AssessmentEnvironment() {
 		warningsRef.current += 1;
 		const currentWarnings = warningsRef.current;
 
+		proctoringLogsRef.current.push({
+			timestamp: new Date().toISOString(),
+			reason: reason,
+			evidence: evidenceImage,
+		});
+
 		setWarnings(currentWarnings);
 		setWarningCountdown(60);
+		setViolationSource(source);
 		setViolationMessage(
 			currentWarnings >= MAX_WARNINGS
 				? `🚨 ${reason}. You reached 3 strikes.`
@@ -667,7 +781,7 @@ export default function AssessmentEnvironment() {
 			if (!checkIsFullscreen()) {
 				isFullscreenRef.current = false;
 				setIsFullscreen(false);
-				handleViolation("Exited Fullscreen mode");
+				handleViolation("Exited Fullscreen mode",null,"system");
 			}
 		};
 
@@ -811,7 +925,7 @@ export default function AssessmentEnvironment() {
 					video,
 					new faceapi.TinyFaceDetectorOptions({
 						inputSize: 224,
-						scoreThreshold: 0.5,
+						scoreThreshold: 0.4,
 					}),
 				)
 				.withFaceLandmarks()
@@ -1263,6 +1377,21 @@ export default function AssessmentEnvironment() {
 					PROCTORING WARNING
 				</h1>
 				<div className="bg-red-900/50 border border-red-500 p-4 rounded-xl mb-6 max-w-lg">
+					{/* ✅ FIX: Display which camera caught the violation */}
+					{violationSource === "mobile" ? (
+						<div className="flex items-center gap-2 bg-red-950 px-4 py-1.5 rounded-full mb-4 border border-red-800 text-red-300 font-bold text-sm shadow-inner">
+							<Smartphone size={16} /> Detected by Secondary Camera
+							(Mobile)
+						</div>
+					) : violationSource === "system" ? (
+						<div className="flex items-center gap-2 bg-red-950 px-4 py-1.5 rounded-full mb-4 border border-yellow-800 text-yellow-500 font-bold text-sm shadow-inner">
+							<ShieldCheck size={16} /> System Integrity Alert
+						</div>
+					) : (
+						<div className="flex items-center gap-2 bg-red-950 px-4 py-1.5 rounded-full mb-4 border border-red-800 text-red-300 font-bold text-sm shadow-inner">
+							<Camera size={16} /> Detected by Primary Camera (Laptop)
+						</div>
+					)}
 					<p className="text-xl text-red-100 font-bold">
 						{violationMessage || "You are out of fullscreen mode."}
 					</p>
@@ -1427,13 +1556,23 @@ export default function AssessmentEnvironment() {
 									<button
 										disabled={currentMcqIndex === 0}
 										onClick={() => setCurrentMcqIndex((prev) => prev - 1)}
-										className="px-6 py-3 bg-slate-800 rounded-lg font-bold">
+										className="px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold transition-colors">
 										Previous
 									</button>
+
+									{/* ✅ FIX: Smart Next Button that bridges MCQs to the Coding Tab */}
 									<button
-										onClick={() => setCurrentMcqIndex((prev) => prev + 1)}
-										className="px-6 py-3 bg-blue-600 rounded-lg font-bold">
-										Next
+										onClick={() => {
+											if (currentMcqIndex === assessment.mcqs.length - 1) {
+												setActiveTab("dsa"); // Switch to coding tab
+											} else {
+												setCurrentMcqIndex((prev) => prev + 1);
+											}
+										}}
+										className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition-colors">
+										{currentMcqIndex === assessment.mcqs.length - 1
+											? "Go to Coding"
+											: "Next"}
 									</button>
 								</div>
 							</div>

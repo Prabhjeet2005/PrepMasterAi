@@ -32,6 +32,18 @@ const assessmentResultSchema = new mongoose.Schema(
 				isHidden: Boolean,
 			},
 		],
+
+		warnings: {
+			type: Number,
+			default: 0,
+		},
+		proctoringLogs: [
+			{
+				timestamp: { type: Date },
+				reason: { type: String },
+				evidence: {type: String}
+			},
+		],
 	},
 	{ timestamps: true },
 );
