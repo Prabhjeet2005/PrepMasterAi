@@ -11,13 +11,16 @@ import {
 	Code2,
 	ListTodo,
 	Settings,
+	CheckCircle2
 } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function CreateAssessmentPage() {
 	const { authUser, isLoading: authLoading } = useAuthContext();
 	const router = useRouter();
 
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [showSuccessModal, setShowSuccessModal] = useState(false);
 
 	// --- FORM STATES ---
 	const [general, setGeneral] = useState({
@@ -128,11 +131,11 @@ export default function CreateAssessmentPage() {
 	// --- SUBMIT ---
 	const handlePublish = async () => {
 		if (!general.title || !general.description)
-			return alert("Title and Description are required!");
+			return toast.error("Title and Description are required!");
 
 		for (let i = 0; i < dsaQuestions.length; i++) {
 			if (dsaQuestions[i].testCases.length === 0) {
-				return alert(
+				return toast.error(
 					`Coding Challenge #${i + 1} must have at least one test case.`,
 				);
 			}
@@ -156,11 +159,11 @@ export default function CreateAssessmentPage() {
 				},
 			);
 
-			alert("Assessment published successfully!");
+			setShowSuccessModal(true);
 			router.push("/assessments");
 		} catch (error) {
 			console.error("Publish failed", error);
-			alert("Failed to publish assessment.");
+			toast.error("Failed to publish assessment.");
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -569,6 +572,29 @@ export default function CreateAssessmentPage() {
 					</button>
 				</div>
 			</div>
+			{/* ✅ CUSTOM SUCCESS MODAL */}
+			{showSuccessModal && (
+				<div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+					<div className="bg-slate-900 border border-slate-700 p-8 rounded-3xl max-w-md w-full shadow-2xl text-center animate-in zoom-in duration-200">
+						<div className="w-20 h-20 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/30">
+							<CheckCircle2 size={40} />
+						</div>
+						<h2 className="text-3xl font-black text-white mb-4">
+							Assessment Created!
+						</h2>
+						<p className="text-slate-300 mb-8 text-base">
+							Your Online Assessment has been successfully published and is
+							now ready for candidates.
+						</p>
+						<button
+							type="button"
+							onClick={() => router.push("/recruiter/dashboard")}
+							className="w-full px-6 py-4 rounded-xl font-bold bg-green-600 hover:bg-green-500 text-white transition-colors shadow-lg shadow-green-900/20">
+							Go to Dashboard
+						</button>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

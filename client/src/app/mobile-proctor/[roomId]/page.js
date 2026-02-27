@@ -283,7 +283,7 @@ export default function MobileProctorPage() {
 						missingFaceTimerRef.current += 1;
 
 						// Soft warning at ~10 seconds of obstruction
-						if (missingFaceTimerRef.current === 2) {
+						if (missingFaceTimerRef.current === 4) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
@@ -291,7 +291,7 @@ export default function MobileProctorPage() {
 							});
 						}
 						// Strike at ~20+ seconds of obstruction
-						else if (missingFaceTimerRef.current >= 3) {
+						else if (missingFaceTimerRef.current >= 7) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -357,8 +357,8 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ FIX: Soft warning at ~3 seconds
-						if (missingHandsTimerRef.current === 2) {
+						// ✅ FIX: Soft warning at ~15 seconds
+						if (missingHandsTimerRef.current === 4) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
@@ -366,8 +366,8 @@ export default function MobileProctorPage() {
 							});
 							nextDelay = 1500;
 						}
-						// ✅ FIX: Hard Strike at ~6 seconds
-						else if (missingHandsTimerRef.current >= 4) {
+						// ✅ FIX: Hard Strike at ~30 seconds
+						else if (missingHandsTimerRef.current >= 7) {
 							const evidence = captureEvidence(
 								video,
 								null,

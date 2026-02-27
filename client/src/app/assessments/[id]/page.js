@@ -944,9 +944,13 @@ export default function AssessmentEnvironment() {
 
 			// 2. Ensure Mobile Phone has sent a scan
 			if (!latestMobileDescriptorRef.current) {
-				throw new Error(
+				toast.error(
 					"Waiting for mobile camera scan. Ensure your face is visible on your phone.",
+					{ id: "mobile-scan-wait", duration: 3000 },
 				);
+				toast.dismiss(toastId);
+				setIsVerifying(false);
+				return;
 			}
 
 			// 3. Compare the two faces
