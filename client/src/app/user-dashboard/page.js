@@ -26,6 +26,7 @@ import {
 	Tooltip,
 	ResponsiveContainer,
 } from "recharts";
+import toast from "react-hot-toast";
 
 export default function UserDashboardPage() {
 	const { authUser, isLoading: authLoading } = useAuthContext();
@@ -43,6 +44,40 @@ export default function UserDashboardPage() {
 	const [assessments, setAssessments] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+
+	const [interviewToDelete, setInterviewToDelete] = useState(null);
+
+	const confirmDelete = (id) => {
+		setInterviewToDelete(id);
+	};
+
+	const executeDelete = async () => {
+		if (!interviewToDelete) return;
+		try {
+			await axios.delete(
+				`${process.env.NEXT_PUBLIC_API_URL}/api/interview/history/${interviewToDelete}`,
+				{ withCredentials: true },
+			);
+			setInterviews((prev) => {
+				const updated = prev.filter(
+					(inv) => inv._id !== interviewToDelete,
+				);
+				if (
+					updated.length > 0 &&
+					Math.ceil(updated.length / ITEMS_PER_PAGE) < interviewPage
+				) {
+					setInterviewPage(Math.max(1, interviewPage - 1));
+				}
+				return updated;
+			});
+			toast.success("Interview deleted successfully."); // ✅ Replaced alert()
+		} catch (err) {
+			toast.error("Failed to delete interview."); // ✅ Replaced alert()
+		} finally {
+			setInterviewToDelete(null); // Close modal
+		}
+	};
+
 
 	useEffect(() => {
 		if (!authLoading && !authUser) {
@@ -370,9 +405,7 @@ export default function UserDashboardPage() {
 													)}
 
 													<button
-														onClick={() =>
-															handleDeleteInterview(interview._id)
-														}
+														onClick={() => confirmDelete(interview._id)}
 														className="text-slate-500 hover:text-red-400 hover:bg-red-400/10 p-1.5 sm:p-2 rounded-lg transition-colors bg-slate-950 border border-slate-800 shrink-0"
 														title="Delete Interview">
 														<Trash2 size={16} />
@@ -658,6 +691,39 @@ export default function UserDashboardPage() {
 									title="Resume PDF Viewer"
 								/>
 							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* ✅ CUSTOM CONFIRMATION MODAL */}
+			{interviewToDelete && (
+				<div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+					<div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+						<div className="flex items-center gap-3 text-red-400 mb-4">
+							<div className="p-3 bg-red-900/30 rounded-full">
+								<AlertCircle size={24} />
+							</div>
+							<h3 className="text-xl font-bold text-white">
+								Delete Interview?
+							</h3>
+						</div>
+						<p className="text-slate-400 mb-8 text-sm">
+							Are you sure you want to permanently delete this interview
+							record? This action cannot be undone and the feedback will be
+							lost forever.
+						</p>
+						<div className="flex gap-3 justify-end">
+							<button
+								onClick={() => setInterviewToDelete(null)}
+								className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 transition-colors">
+								Cancel
+							</button>
+							<button
+								onClick={executeDelete}
+								className="px-5 py-2.5 rounded-xl text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors shadow-lg shadow-red-900/20">
+								Yes, Delete
+							</button>
 						</div>
 					</div>
 				</div>

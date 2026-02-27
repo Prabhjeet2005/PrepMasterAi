@@ -11,6 +11,8 @@ import {
 	FileText,
 	AlertCircle,
 	CheckCircle2,
+	ChevronRight,
+	ChevronLeft,
 } from "lucide-react";
 
 export default function AssessmentsListPage() {
@@ -21,6 +23,10 @@ export default function AssessmentsListPage() {
 	const [completedAssessments, setCompletedAssessments] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+
+	const [availablePage, setAvailablePage] = useState(1);
+	const [completedPage, setCompletedPage] = useState(1);
+	const ITEMS_PER_PAGE = 6;
 
 	useEffect(() => {
 		if (!authLoading && !authUser) {
@@ -66,6 +72,22 @@ export default function AssessmentsListPage() {
 		if (authUser) fetchData();
 	}, [authUser, authLoading, router]);
 
+	const totalAvailablePages = Math.ceil(
+		availableAssessments.length / ITEMS_PER_PAGE,
+	);
+	const paginatedAvailable = availableAssessments.slice(
+		(availablePage - 1) * ITEMS_PER_PAGE,
+		availablePage * ITEMS_PER_PAGE,
+	);
+
+	const totalCompletedPages = Math.ceil(
+		completedAssessments.length / ITEMS_PER_PAGE,
+	);
+	const paginatedCompleted = completedAssessments.slice(
+		(completedPage - 1) * ITEMS_PER_PAGE,
+		completedPage * ITEMS_PER_PAGE,
+	);
+
 	if (authLoading || loading) {
 		return (
 			<div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -96,7 +118,7 @@ export default function AssessmentsListPage() {
 					</div>
 
 					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-						{availableAssessments.map((assessment) => (
+						{paginatedAvailable.map((assessment) => (
 							<div
 								key={assessment._id}
 								className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all flex flex-col relative overflow-hidden group shadow-lg">
@@ -128,6 +150,7 @@ export default function AssessmentsListPage() {
 								</Link>
 							</div>
 						))}
+
 						{availableAssessments.length === 0 && (
 							<div className="col-span-full flex flex-col items-center justify-center py-16 bg-slate-900/50 border border-dashed border-slate-800 rounded-3xl">
 								<CheckCircle2
@@ -140,6 +163,30 @@ export default function AssessmentsListPage() {
 							</div>
 						)}
 					</div>
+					{/* Available Pagination */}
+					{totalAvailablePages > 1 && (
+						<div className="flex justify-center items-center gap-4 mt-8">
+							<button
+								onClick={() => setAvailablePage((p) => Math.max(1, p - 1))}
+								disabled={availablePage === 1}
+								className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white transition-colors">
+								<ChevronLeft size={20} />
+							</button>
+							<span className="text-slate-400 text-sm font-bold">
+								Page {availablePage} of {totalAvailablePages}
+							</span>
+							<button
+								onClick={() =>
+									setAvailablePage((p) =>
+										Math.min(totalAvailablePages, p + 1),
+									)
+								}
+								disabled={availablePage === totalAvailablePages}
+								className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white transition-colors">
+								<ChevronRight size={20} />
+							</button>
+						</div>
+					)}
 				</div>
 
 				{/* BOTTOM HALF: COMPLETED ASSESSMENTS */}
@@ -154,7 +201,7 @@ export default function AssessmentsListPage() {
 					</div>
 
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-						{completedAssessments.map((history) => (
+						{paginatedCompleted.map((history) => (
 							<div
 								key={history._id}
 								className="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex justify-between items-center opacity-80 hover:opacity-100 transition-opacity">
@@ -191,6 +238,30 @@ export default function AssessmentsListPage() {
 							</div>
 						)}
 					</div>
+					{/* Completed Pagination */}
+					{totalCompletedPages > 1 && (
+						<div className="flex justify-center items-center gap-4 mt-8">
+							<button
+								onClick={() => setCompletedPage((p) => Math.max(1, p - 1))}
+								disabled={completedPage === 1}
+								className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white transition-colors">
+								<ChevronLeft size={20} />
+							</button>
+							<span className="text-slate-400 text-sm font-bold">
+								Page {completedPage} of {totalCompletedPages}
+							</span>
+							<button
+								onClick={() =>
+									setCompletedPage((p) =>
+										Math.min(totalCompletedPages, p + 1),
+									)
+								}
+								disabled={completedPage === totalCompletedPages}
+								className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white transition-colors">
+								<ChevronRight size={20} />
+							</button>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>

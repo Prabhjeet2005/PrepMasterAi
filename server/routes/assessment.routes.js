@@ -9,6 +9,7 @@ const {
 	getRecruiterAssessments,
 	getAssessmentSubmissions,
 	getAssessmentResultById,
+	deleteAssessment,
 } = require("../controllers/assessment.controller.js");
 const protectRoute = require("../middlewares/protectRoute.js");
 
@@ -34,5 +35,7 @@ router.get("/result/:id", protectRoute, getAssessmentResultById);
 
 router.post("/:id/submit", protectRoute, submitAssessment);
 router.get("/:id", protectRoute, getAssessmentById);
+router.delete("/:id", protectRoute, deleteAssessment);
+
 
 module.exports = router;

@@ -352,4 +352,34 @@ const getAssessmentSubmissions = async (req, res) => {
 	}
 };
 
-module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode, submitAssessment, getUserAssessmentHistory,getAssessmentResultById, getRecruiterAssessments ,getAssessmentSubmissions };
+const deleteAssessment = async (req, res) => {
+	try {
+		const { id } = req.params;
+
+		// 1. Find and delete the assessment, strictly enforcing ownership
+		const deletedAssessment = await Assessment.findOneAndDelete({
+			_id: id,
+			createdBy: req.user._id,
+		});
+
+		if (!deletedAssessment) {
+			return res
+				.status(404)
+				.json({ error: "Assessment not found or unauthorized to delete" });
+		}
+
+		// 2. Cleanup: Delete all student results tied to this assessment
+		await AssessmentResult.deleteMany({ assessmentId: id });
+
+		res
+			.status(200)
+			.json({
+				message: "Assessment and related submissions deleted successfully",
+			});
+	} catch (error) {
+		console.error("Delete Assessment Error:", error);
+		res.status(500).json({ error: "Failed to delete assessment" });
+	}
+};
+
+module.exports = { createAssessment, getAllAssessments, getAssessmentById, executeCode, submitAssessment, getUserAssessmentHistory,getAssessmentResultById, getRecruiterAssessments ,getAssessmentSubmissions, deleteAssessment };

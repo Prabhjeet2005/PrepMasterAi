@@ -16,9 +16,13 @@ import {
 	ShieldCheck,
 	CheckCircle2,
 	Code2,
-	Camera,ExternalLink,Search,ListFilter
+	Camera,ExternalLink,Search,ListFilter,
+	Trash2,
+	FileText,
+	AlertCircle
 } from "lucide-react";
 import Link from "next/link";
+import toast from "react-hot-toast"; // ✅ ADD THIS
 
 export default function RecruiterDashboard() {
 	const { authUser, isLoading: authLoading } = useAuthContext();
@@ -35,6 +39,8 @@ export default function RecruiterDashboard() {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [sortBy, setSortBy] = useState("newest");
 	const [imageLoading, setImageLoading] = useState(true);
+
+	const [assessmentToDelete, setAssessmentToDelete] = useState(null); 
 
 	useEffect(() => {
 		if (!authLoading) {
@@ -60,6 +66,35 @@ export default function RecruiterDashboard() {
 			console.error(err);
 		} finally {
 			setLoading(false);
+		}
+	};
+
+	const confirmDeleteAssessment = (e, id) => {
+		e.stopPropagation();
+		setAssessmentToDelete(id);
+	};
+
+	const executeDeleteAssessment = async () => {
+		if (!assessmentToDelete) return;
+		try {
+			await axios.delete(
+				`${process.env.NEXT_PUBLIC_API_URL}/api/assessment/${assessmentToDelete}`,
+				{
+					withCredentials: true,
+				},
+			);
+			setAssessments((prev) =>
+				prev.filter((a) => a._id !== assessmentToDelete),
+			);
+			if (selectedOaId === assessmentToDelete) {
+				setSelectedOaId(null);
+				setSubmissions([]);
+			}
+			toast.success("Assessment deleted successfully.");
+		} catch (error) {
+			toast.error("Failed to delete assessment.");
+		} finally {
+			setAssessmentToDelete(null);
 		}
 	};
 
@@ -136,24 +171,41 @@ export default function RecruiterDashboard() {
 								You haven't created any assessments yet.
 							</div>
 						) : (
-							assessments.map((oa) => (
-								<button
-									key={oa._id}
-									onClick={() => handleSelectOa(oa._id)}
-									className={`w-full text-left p-5 rounded-xl border transition-all ${selectedOaId === oa._id ? "bg-blue-900/20 border-blue-500 ring-1 ring-blue-500" : "bg-slate-900 border-slate-800 hover:border-slate-600"}`}>
-									<h3 className="font-bold text-white mb-2 line-clamp-1">
-										{oa.title}
+							assessments.map((assessment) => (
+								<div
+									key={assessment._id}
+									onClick={() => handleSelectOa(assessment._id)}
+									className={`p-4 rounded-xl cursor-pointer transition-all border relative group ${
+										selectedOaId === assessment._id
+											? "bg-blue-900/20 border-blue-500/50"
+											: "bg-slate-900/50 border-slate-800 hover:bg-slate-800"
+									}`}>
+									{/* ✅ NEW: Delete Button */}
+									<button
+										onClick={(e) =>
+											confirmDeleteAssessment(e, assessment._id)
+										}
+										className="absolute top-3 right-3 text-slate-500 hover:text-red-400 p-1.5 rounded-md hover:bg-red-400/10 transition-colors opacity-0 group-hover:opacity-100"
+										title="Delete Assessment">
+										<Trash2 size={16} />
+									</button>
+
+									<h3 className="font-bold text-slate-200 mb-1 pr-6 truncate">
+										{assessment.title}
 									</h3>
-									<div className="flex items-center justify-between text-xs text-slate-400 font-bold">
+									<div className="flex items-center gap-4 text-sm text-slate-500 font-medium mt-3">
 										<span className="flex items-center gap-1">
-											<Calendar size={14} />{" "}
-											{new Date(oa.createdAt).toLocaleDateString()}
+											<Clock size={20} /> {assessment.durationMinutes}m
+										</span>
+										<span className="flex  items-center gap-1">
+											<FileText size={20} /> {assessment.mcqs?.length || 0}
 										</span>
 										<span className="flex items-center gap-1">
-											<Clock size={14} /> {oa.durationMinutes}m
+											<Code2 size={20} />{" "}
+											{assessment.dsaQuestions?.length || 0}
 										</span>
 									</div>
-								</button>
+								</div>
 							))
 						)}
 					</div>
@@ -253,13 +305,6 @@ export default function RecruiterDashboard() {
 															{sub.totalScore?.toFixed(2)}
 														</div>
 													</div>
-													{/* The Recruiter can click this to view the candidate's specific code using the page we just built! */}
-													{/* <Link
-														href={`/user-dashboard/assessment/${sub._id}`}
-														className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-300 transition-colors"
-														title="View Code Submission">
-														<Eye size={18} />
-													</Link> */}
 													<button
 														onClick={() => setSelectedSubmission(sub)}
 														className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-blue-400 transition-colors shadow"
@@ -440,6 +485,38 @@ export default function RecruiterDashboard() {
 					</p>
 				</div>
 			)}
+
+			{assessmentToDelete && (
+				<div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+					<div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+						<div className="flex items-center gap-3 text-red-400 mb-4">
+							<div className="p-3 bg-red-900/30 rounded-full">
+								<AlertCircle size={24} />
+							</div>
+							<h3 className="text-xl font-bold text-white">
+								Delete Assessment?
+							</h3>
+						</div>
+						<p className="text-slate-400 mb-8 text-sm">
+							This will permanently delete the Online Assessment and{" "}
+							<strong>ALL student submissions</strong> associated with it.
+							This cannot be undone.
+						</p>
+						<div className="flex gap-3 justify-end">
+							<button
+								onClick={() => setAssessmentToDelete(null)}
+								className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 transition-colors">
+								Cancel
+							</button>
+							<button
+								onClick={executeDeleteAssessment}
+								className="px-5 py-2.5 rounded-xl text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors shadow-lg">
+								Yes, Delete Everything
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
@@ -450,8 +527,8 @@ function Clock(props) {
 		<svg
 			{...props}
 			xmlns="http://www.w3.org/2000/svg"
-			width="24"
-			height="24"
+			width="20"
+			height="20"
 			viewBox="0 0 24 24"
 			fill="none"
 			stroke="currentColor"
