@@ -146,7 +146,7 @@ export default function AssessmentEnvironment() {
 
 					// THE FIX: Increased the safety margin to +20, and raised the cap to 80
 					// to easily accommodate noisy environments without false-flagging.
-					const customThreshold = Math.min(avgBaseline + 20, 80);
+					const customThreshold = Math.min(avgBaseline + 30, 120);
 					audioThresholdRef.current = customThreshold;
 
 					console.log(
@@ -220,18 +220,28 @@ export default function AssessmentEnvironment() {
 		const socket = io(process.env.NEXT_PUBLIC_API_URL);
 		socketRef.current = socket;
 
+		let disconnectTimer;
+
 		socket.on("connect", () => {
 			socket.emit("create_proctoring_room", roomId);
 		});
+
 		socket.on("mobile_connected", () => {
+			clearTimeout(disconnectTimer); // Cancel the strike if they reconnect in time!
 			setIsMobileConnected(true);
 		});
+
 		socket.on("mobile_disconnected", () => {
-			setIsMobileConnected(false);
-			if (hasStartedRef.current)
-				handleViolation(
-					"Mobile camera disconnected! Test environment compromised.",
-				);
+			// THE FIX: Wait 10 seconds before declaring it officially disconnected.
+			// Mobile networks and backgrounded Safari tabs often drop sockets for 1-2 seconds.
+			disconnectTimer = setTimeout(() => {
+				setIsMobileConnected(false);
+				if (hasStartedRef.current) {
+					handleViolation(
+						"Mobile camera disconnected! Test environment compromised.",
+					);
+				}
+			}, 10000);
 		});
 		socket.on("trigger_laptop_strike", (reason) => {
 			handleViolation(`Mobile Proctor Alert: ${reason}`);
@@ -361,19 +371,13 @@ export default function AssessmentEnvironment() {
 	useEffect(() => {
 		if (hasStarted) return;
 
-		// Checks every 5 seconds if the mobile connection dropped while in Step 3
 		const preTestPoller = setInterval(() => {
+			// Now this only fires if the 10-second socket timeout above officially sets it to false
 			if (setupStep === 3 && !isMobileConnected) {
 				setSetupStep(2);
 				toast.error("⚠️ Mobile camera disconnected. Please reconnect.");
 			}
 		}, 5000);
-
-		// Instant fallback just in case the socket catches it before the 5s timer
-		if (setupStep === 3 && !isMobileConnected) {
-			setSetupStep(2);
-			toast.error("⚠️ Mobile camera disconnected. Please reconnect.");
-		}
 
 		return () => clearInterval(preTestPoller);
 	}, [setupStep, isMobileConnected, hasStarted]);
@@ -479,7 +483,8 @@ export default function AssessmentEnvironment() {
 				const lowerLip = landmarks[66]; // Inner bottom lip
 				const lipDistance = Math.abs(lowerLip.y - upperLip.y);
 
-				const isLipsMoving = lipDistance > 5; // If gap is > 5px, they are talking out loud
+				// THE FIX: Lowered from 5 to 2.5. Even tiny lip movements (like whispering) will now protect them from a strike.
+				const isLipsMoving = lipDistance > 2.5;
 
 				let currentVoiceLevel = 0;
 				let isVoiceDominant = false;
@@ -494,9 +499,6 @@ export default function AssessmentEnvironment() {
 					let noiseSum = 0;
 					let noiseBinCount = 0;
 
-					// Bins 2-17 are vocal range (approx 300Hz - 3000Hz).
-					// Bins 0-1 (bass) and 18-40 (mid-treble) are our reference noise floor.
-					// THE FIX: We stop checking at bin 40 because super-high frequencies are naturally quiet and ruin the average.
 					for (let i = 0; i < 40; i++) {
 						if (i >= 2 && i <= 17) {
 							voiceSum += dataArray[i];
@@ -509,11 +511,10 @@ export default function AssessmentEnvironment() {
 					currentVoiceLevel = voiceSum / 16;
 					const backgroundNoiseLevel = noiseSum / noiseBinCount;
 
-					// SNR Check: Voice must be distinctly louder (+25) than the adjacent background noise.
-					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 25;
+					// THE FIX: Increased to +35. The vocal sound must be MASSIVELY louder than the room noise to trigger.
+					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 35;
 				}
 
-				// If vocal frequencies spike above threshold, AND they stand out from background noise, AND lips are shut:
 				if (
 					currentVoiceLevel > audioThresholdRef.current &&
 					isVoiceDominant &&
@@ -521,11 +522,12 @@ export default function AssessmentEnvironment() {
 				) {
 					audioStrikeTimerRef.current += 1;
 
-					if (audioStrikeTimerRef.current >= 4) {
+					// THE FIX: Increased from 4 to 6 sweeps (approx 9 full seconds of continuous talking with closed lips)
+					if (audioStrikeTimerRef.current >= 6) {
 						handleViolation(
 							"Unusual background audio detected while lips were closed. Off-camera assistance suspected.",
 						);
-						audioStrikeTimerRef.current = 0; // Reset after striking
+						audioStrikeTimerRef.current = 0;
 					}
 				} else {
 					audioStrikeTimerRef.current = 0;
