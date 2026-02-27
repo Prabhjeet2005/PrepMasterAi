@@ -23,7 +23,11 @@ const uploadBase64Image = async (base64String) => {
 const uploadPDFBuffer = async (buffer) => {
 	return new Promise((resolve, reject) => {
 		const uploadStream = cloudinary.uploader.upload_stream(
-			{ folder: "prepmaster/resumes", resource_type: "raw" },
+			{
+				folder: "prepmaster/resumes",
+				resource_type: "image",
+				format: "pdf",
+			},
 			(error, result) => {
 				if (error) {
 					console.error("Cloudinary PDF Upload Error:", error);
