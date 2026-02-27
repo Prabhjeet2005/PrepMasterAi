@@ -1,0 +1,474 @@
+"use client";
+import { useEffect, useState, useRef } from "react";
+import { useParams } from "next/navigation";
+import { io } from "socket.io-client";
+import { CheckCircle2, ShieldAlert, Loader2, Flag } from "lucide-react";
+
+let faceapi;
+let tf; 
+let cocoSsd; 
+let handPoseDetection;
+
+export default function MobileProctorPage() {
+	const { roomId } = useParams();
+	const [status, setStatus] = useState("connecting");
+	const [mediaStream, setMediaStream] = useState(null);
+
+	const streamRef = useRef(null);
+	const videoRef = useRef(null);
+	const socketRef = useRef(null);
+	const faceScanIntervalRef = useRef(null);
+	const objectDetectorRef = useRef(null);
+	const handModelRef = useRef(null);
+	const missingHandsTimerRef = useRef(0);
+	const missingFaceTimerRef = useRef(0);
+	const isGracePeriodRef = useRef(true);
+	const isAiReadyRef = useRef(false);
+
+	// Disarm the grace period 3 seconds after successfully pairing
+	useEffect(() => {
+		if (status === "paired") {
+			setTimeout(() => {
+				isGracePeriodRef.current = false;
+			}, 3000);
+		}
+	}, [status]);
+
+	useEffect(() => {
+		socketRef.current = io(process.env.NEXT_PUBLIC_API_URL);
+		const socket = socketRef.current;
+
+		socket.on("connect", () => {
+			socket.emit("mobile_join_room", roomId);
+			setStatus("paired");
+		});
+
+		socket.on("connect_error", () => setStatus("error"));
+
+		socket.on("proctoring_ended", () => {
+			setStatus("completed");
+			if (streamRef.current)
+				streamRef.current.getTracks().forEach((track) => track.stop());
+		});
+
+		const requestWakeLock = async () => {
+			try {
+				if ("wakeLock" in navigator)
+					await navigator.wakeLock.request("screen");
+			} catch (err) {}
+		};
+		requestWakeLock();
+
+		return () => {
+			socket.disconnect();
+			if (streamRef.current)
+				streamRef.current.getTracks().forEach((track) => track.stop());
+		};
+	}, [roomId]);
+
+	// INSTANT KILL ON BACKGROUNDING
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			// THE FIX: Only trigger if the document is completely hidden (swapped apps or minimized)
+			if (document.hidden && status === "paired" && socketRef.current && !isGracePeriodRef.current) {
+        socketRef.current.emit("mobile_violation_detected", {
+          roomId,
+          reason: "Mobile browser minimized or backgrounded.",
+        });
+        if (streamRef.current)
+          streamRef.current.getTracks().forEach((track) => track.stop());
+        socketRef.current.disconnect();
+        setStatus("disconnected");
+      }
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+
+		return () => {
+			document.removeEventListener(
+				"visibilitychange",
+				handleVisibilityChange,
+			);
+		};
+	}, [status, roomId]);
+
+	// START CAMERA
+	useEffect(() => {
+		if (status === "paired" && !mediaStream) {
+			const startCamera = async () => {
+				try {
+					const stream = await navigator.mediaDevices.getUserMedia({
+						video: {
+							facingMode: "user",
+							width: { ideal: 1280 },
+							height: { ideal: 720 },
+						},
+						audio: false,
+					});
+					streamRef.current = stream;
+					setMediaStream(stream);
+
+					stream.getVideoTracks()[0].onended = () => {
+						if (socketRef.current && status === "paired") {
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason: "Camera access revoked.",
+							});
+							socketRef.current.disconnect();
+							setStatus("disconnected");
+						}
+					};
+				} catch (err) {
+					setStatus("error");
+				}
+			};
+			startCamera();
+		}
+	}, [status, roomId, mediaStream]);
+
+	// BULLETPROOF VIDEO BINDING FOR MOBILE
+	useEffect(() => {
+		if (videoRef.current && mediaStream) {
+			const video = videoRef.current;
+			video.srcObject = mediaStream;
+			// CRITICAL: Forces mobile browsers to render the video inline without full-screening it or blocking it
+			video.setAttribute("playsinline", "true");
+			video.setAttribute("autoplay", "true");
+			video.play().catch((e) => console.error("Mobile Play Error:", e));
+		}
+	}, [mediaStream, status]);
+
+	// ==========================================
+	// MOBILE AI: FACE DESCRIPTOR GENERATOR
+	// ==========================================
+	useEffect(() => {
+		const loadModels = async () => {
+			try {
+				if (!faceapi) {
+					const module = await import("@vladmandic/face-api");
+					faceapi = module.default || module;
+				}
+
+				// NEW: Load TensorFlow and COCO-SSD dynamically for SSR safety
+				if (!cocoSsd) {
+					tf = await import("@tensorflow/tfjs");
+					await tf.ready(); // Initializes the WebGL backend
+					const cocoModule = await import("@tensorflow-models/coco-ssd");
+					cocoSsd = cocoModule.default || cocoModule;
+				}
+
+				if (!handPoseDetection) {
+					const hpdModule =
+						await import("@tensorflow-models/hand-pose-detection");
+					handPoseDetection = hpdModule.default || hpdModule;
+				}
+
+				const MODEL_URL =
+					"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+				await Promise.all([
+					faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+					faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+					faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+				]);
+
+				// NEW: Load the Object Detection Model
+				objectDetectorRef.current = await cocoSsd.load();
+
+				const handModel = handPoseDetection.SupportedModels.MediaPipeHands;
+				const detectorConfig = {
+					runtime: "tfjs",
+					modelType: "full",
+					maxHands: 2, // THIS IS THE MAGIC BULLET!
+				};
+				handModelRef.current = await handPoseDetection.createDetector(
+					handModel,
+					detectorConfig,
+				);
+
+				console.log("✅ Mobile AI Identity & Object Models Loaded");
+				isAiReadyRef.current = true;
+			} catch (e) {
+				console.error("Mobile Model load error", e);
+			}
+		};
+		loadModels();
+	}, []);
+
+	useEffect(() => {
+		if (status !== "paired" || !mediaStream || !videoRef.current) return;
+
+		const video = videoRef.current;
+		let isScanning = false;
+
+		// Recursive function to handle the AI scan
+		const runAiScan = async () => {
+			if (
+				video.paused ||
+				video.ended ||
+				!socketRef.current ||
+				isScanning
+			) {
+				scheduleNextScan(3000); // Retry soon if busy
+				return;
+			}
+
+			if (!isAiReadyRef.current) {
+				console.log(
+					"[AI] Models still downloading... checking again in 2 seconds.",
+				);
+				scheduleNextScan(2000);
+				return;
+			}
+
+			isScanning = true;
+
+			// CRITICAL FIX: TFJS requires explicit DOM width/height attributes
+			if (!video.width && video.videoWidth) {
+				video.width = video.videoWidth;
+				video.height = video.videoHeight;
+			}
+
+			// Faster polling (3 to 7 seconds) won't choke the CPU but catches cheaters faster.
+			let nextDelay = Math.floor(Math.random() * (7000 - 3000 + 1)) + 5000;
+
+			const captureEvidence = (vid, bbox = null, label = "") => {
+				const canvas = document.createElement("canvas");
+				canvas.width = vid.videoWidth;
+				canvas.height = vid.videoHeight;
+				const ctx = canvas.getContext("2d");
+				ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+				if (bbox) {
+					ctx.strokeStyle = "red";
+					ctx.lineWidth = 4;
+					ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+					ctx.fillStyle = "red";
+					ctx.font = "bold 24px Arial";
+					ctx.fillText(label.toUpperCase(), bbox[0], bbox[1] - 10);
+				} else if (label) {
+					// Draw large red text banner at the top if there is no bounding box
+					ctx.fillStyle = "rgba(220, 38, 38, 0.85)";
+					ctx.fillRect(0, 20, canvas.width, 50);
+					ctx.fillStyle = "white";
+					ctx.font = "bold 28px Arial";
+					ctx.textAlign = "center";
+					ctx.fillText(label.toUpperCase(), canvas.width / 2, 55);
+				}
+				return canvas.toDataURL("image/jpeg", 0.4); // Compress for socket transit
+			};
+
+			// =====================================
+			// 1. FACE IDENTITY SCANNER
+			// =====================================
+			try {
+				if (faceapi) {
+					const detection = await faceapi
+						.detectSingleFace(
+							video,
+							new faceapi.TinyFaceDetectorOptions({
+								inputSize: 224,
+								scoreThreshold: 0.3,
+							}),
+						)
+						.withFaceLandmarks()
+						.withFaceDescriptor();
+
+					if (detection) {
+						socketRef.current.emit("send_mobile_face_descriptor", {
+							roomId,
+							descriptor: Array.from(detection.descriptor),
+						});
+						missingFaceTimerRef.current = 0; // Reset timer if face is found
+					} else {
+						missingFaceTimerRef.current += 1;
+
+						// Soft warning at ~10 seconds of obstruction
+						if (missingFaceTimerRef.current === 2) {
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
+							});
+						}
+						// Strike at ~20+ seconds of obstruction
+						else if (missingFaceTimerRef.current >= 3) {
+							const evidence = captureEvidence(
+								video,
+								null,
+								"CAMERA OBSTRUCTED",
+							);
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"Secondary camera obstructed or candidate missing for a prolonged period.",
+								evidence,
+							});
+							missingFaceTimerRef.current = 0;
+						}
+					}
+				}
+			} catch (err) {
+				console.warn("Face AI Skipped:", err.message);
+			}
+
+			// =====================================
+			// 2. FORBIDDEN OBJECT SCANNER
+			// =====================================
+			try {
+				if (objectDetectorRef.current) {
+					const predictions =
+						await objectDetectorRef.current.detect(video);
+					const forbiddenItems = ["cell phone", "book", "remote"];
+
+					const violation = predictions.find((p) => {
+						if (!forbiddenItems.includes(p.class)) return false;
+						// ✅ FIX: Lowered phone confidence to 0.15 so it catches phones even when heavily covered by your hand
+						const requiredConfidence =
+							p.class === "cell phone" || p.class === "remote"
+								? 0.45
+								: 0.5;
+						return p.score > requiredConfidence;
+					});
+
+					if (violation) {
+						const evidence = captureEvidence(
+							video,
+							violation.bbox,
+							violation.class,
+						);
+						socketRef.current.emit("mobile_violation_detected", {
+							roomId,
+							reason: `Forbidden object detected: ${violation.class}`,
+							evidence,
+						});
+					}
+				}
+			} catch (err) {
+				console.warn("Object AI Skipped:", err.message);
+			}
+
+			// =====================================
+			// 3. HAND TRACKING (WITH SOFT WARNING)
+			// =====================================
+			try {
+				if (handModelRef.current) {
+					const hands = await handModelRef.current.estimateHands(video);
+
+					if (hands.length < 2) {
+						missingHandsTimerRef.current += 1;
+
+						// ✅ FIX: Soft warning at ~3 seconds
+						if (missingHandsTimerRef.current === 2) {
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
+							});
+							nextDelay = 1500;
+						}
+						// ✅ FIX: Hard Strike at ~6 seconds
+						else if (missingHandsTimerRef.current >= 4) {
+							const evidence = captureEvidence(
+								video,
+								null,
+								"HAND(S) MISSING",
+							);
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"Hand(s) Missing: Please keep both hands clearly visible on your desk.",
+								evidence,
+							});
+							missingHandsTimerRef.current = 0;
+						} else {
+							nextDelay = 1500;
+						}
+					} else {
+						missingHandsTimerRef.current = 0;
+					}
+				}
+			} catch (err) {
+				console.warn("Hand AI Skipped:", err.message);
+			}
+
+			isScanning = false;
+			scheduleNextScan(nextDelay);
+		};
+
+		// Accepts a dynamic delay parameter
+		const scheduleNextScan = (delay) => {
+			if (status !== "paired") return;
+			faceScanIntervalRef.current = setTimeout(runAiScan, delay);
+		};
+
+		// Kick off the very first scan after 5 seconds
+		faceScanIntervalRef.current = setTimeout(runAiScan, 5000);
+		return () => {
+			// Changed clearInterval to clearTimeout since we switched architectures
+			if (faceScanIntervalRef.current)
+				clearTimeout(faceScanIntervalRef.current);
+		};
+	}, [status, mediaStream, roomId]);
+
+	return (
+		<div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
+			{status === "connecting" && (
+				<div className="flex flex-col items-center animate-pulse">
+					<Loader2 size={64} className="text-blue-500 animate-spin mb-6" />
+					<h1 className="text-2xl font-bold mb-2">Connecting...</h1>
+				</div>
+			)}
+
+			{status === "disconnected" && (
+				<div className="flex flex-col items-center">
+					<ShieldAlert size={64} className="text-red-500 mb-6" />
+					<h1 className="text-2xl font-bold mb-2">Session Terminated</h1>
+					<p className="text-slate-400">
+						You exited the camera view. Rescan the QR code on your laptop.
+					</p>
+				</div>
+			)}
+
+			{status === "completed" && (
+				<div className="flex flex-col items-center animate-in fade-in zoom-in duration-500">
+					<div className="w-24 h-24 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center mb-6 border border-green-500/50">
+						<Flag size={48} />
+					</div>
+					<h1 className="text-3xl font-black mb-2 text-white">Ended</h1>
+					<p className="text-slate-300">You can now lock your phone.</p>
+				</div>
+			)}
+
+			{status === "error" && (
+				<div className="flex flex-col items-center">
+					<ShieldAlert size={64} className="text-red-500 mb-6" />
+					<h1 className="text-2xl font-bold mb-2">Access Denied</h1>
+				</div>
+			)}
+
+			{status === "paired" && (
+				<div className="flex flex-col items-center w-full max-w-md h-full">
+					<div className="flex items-center gap-2 text-green-400 bg-green-900/30 px-4 py-2 rounded-full font-bold mb-6 mt-4">
+						<CheckCircle2 size={20} /> Linked to Assessment
+					</div>
+
+					{/* EXPLICIT HEIGHT (h-[60vh]) PREVENTS CSS COLLAPSE ON MOBILE */}
+					<div className="relative w-full h-[60vh] max-h-[500px] bg-black rounded-3xl overflow-hidden border-4 border-slate-800 shadow-2xl mb-8">
+						<video
+							ref={videoRef}
+							autoPlay
+							playsInline
+							muted
+							className="absolute inset-0 w-full h-full object-cover"
+							style={{ transform: "scaleX(-1)" }}
+						/>
+						<div className="absolute top-4 left-4 bg-black/50 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2 text-xs font-bold border border-white/10">
+							<div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+							PROCTORING ACTIVE
+						</div>
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}

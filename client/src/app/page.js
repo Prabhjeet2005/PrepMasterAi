@@ -70,7 +70,7 @@ export default function Home() {
 							Welcome, {authUser.name}!
 						</h2>
 						<div className="flex gap-4 justify-center mt-8">
-							<Link href="/dashboard">
+							<Link href="/new-interview">
 								<button className="px-8 py-4 bg-purple-600 hover:bg-purple-700 rounded-xl font-bold text-lg transition-all flex items-center gap-2">
 									<Mic size={20} /> Start Mock Ai Interview
 								</button>

@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const interviewRouter = require("./routes/interview.routes");
 const setupSocket = require("./sockets/socketHandler");
+const assessmentRoutes = require("./routes/assessment.routes.js");
 
 
 const app = express(); 
@@ -17,15 +18,20 @@ const server = http.createServer(app);
 // Middleware
 app.use(
 	cors({
-		origin: [
-			"http://localhost:3000",
-			"https://prep-master-ai-client.vercel.app",
-		], // <--- Allow requests from any URL (including Vercel)
+		origin:
+			process.env.NODE_ENV === "production"
+				? [
+						"http://localhost:3000",
+						"http://192.168.1.5:3000",
+						"https://prep-master-ai-client.vercel.app",
+					]
+				: true, // <--- Allow requests from any URL (including Vercel)
 		methods: ["GET", "POST", "PUT", "DELETE"],
 		credentials: true,
 	}),
 );
-app.use(express.json()); // Allows us to receive JSON data
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cookieParser());
 
 mongoose
@@ -37,14 +43,16 @@ mongoose
 app.use("/api/test",(req,res)=>res.json({message:"WORKING"}))
 app.use("/api/auth", authRoutes);
 app.use("/api/interview", interviewRouter);
+app.use("/api/assessment", assessmentRoutes);
 
 // SOCKET
 const io = new Server(server, {
 	cors: {
-		origin: [
+		origin: process.env.NODE_ENV === "production" ?[
 			"http://localhost:3000",
+			"http://192.168.1.5:3000",
 			"https://prep-master-ai-client.vercel.app",
-		], // <--- Allow WebSockets from any URL
+		]:true, // <--- Allow WebSockets from any URL
 		methods: ["GET", "POST"],
 	},
 });

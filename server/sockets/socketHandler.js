@@ -124,8 +124,62 @@ const setupSocket = (io) => {
 			}
 		});
 
+		// ========================================================
+		// ZONE 2: MULTI-DEVICE PROCTORING LOGIC (NEW CODE)
+		// ========================================================
+
+		// 1. Laptop creates a secure room
+		socket.on("create_proctoring_room", (roomId) => {
+			socket.join(roomId);
+			console.log(
+				`[Proctor Socket] Laptop created/joined room: ${roomId}`,
+			);
+		});
+
+		// 2. Mobile device joins the room
+		socket.on("mobile_join_room", (roomId) => {
+			socket.join(roomId);
+			socket.proctorRoomId = roomId; // TAG THE SOCKET
+			socket.isMobile = true; // MARK AS MOBILE
+			console.log(`[Proctor Socket] Mobile joined room: ${roomId}`);
+			socket.to(roomId).emit("mobile_connected");
+		});
+
+		// 3. Mobile detects a violation and alerts the laptop
+		socket.on(
+			"mobile_violation_detected",
+			({ roomId, reason, evidence }) => {
+				console.log(
+					`[Proctor Socket] Mobile Violation in ${roomId}: ${reason}`,
+				);
+				// Send the strike AND the image directly to the laptop
+				socket
+					.to(roomId)
+					.emit("trigger_laptop_strike", { reason, evidence });
+			},
+		);
+
+		// Relay face mathematics from mobile to laptop
+		socket.on("send_mobile_face_descriptor", ({ roomId, descriptor }) => {
+			socket.to(roomId).emit("mobile_face_descriptor", descriptor);
+		});
+
+		// 4. Laptop ends the session completely
+		socket.on("end_proctoring_session", (roomId) => {
+			console.log(`[Proctor Socket] Session ended for room: ${roomId}`);
+			socket.to(roomId).emit("proctoring_ended");
+		});
+
 		socket.on("disconnect", () => {
 			console.log("❌ Client Disconnected");
+
+			if (socket.isMobile && socket.proctorRoomId) {
+				console.log(
+					`[Proctor Socket] Mobile dropped in room: ${socket.proctorRoomId}`,
+				);
+				socket.to(socket.proctorRoomId).emit("mobile_disconnected");
+			}
+
 			if (deepgramLive) {
 				deepgramLive.finish();
 				deepgramLive = null;

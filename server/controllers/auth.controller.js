@@ -31,7 +31,7 @@ const signup = async (req, res) => {
 		res.cookie("jwt", token, {
 			maxAge: 15 * 24 * 60 * 60 * 1000,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 
@@ -39,6 +39,7 @@ const signup = async (req, res) => {
 			_id: newUser._id,
 			name: newUser.name,
 			email: newUser.email,
+			role: "user",
 		});
 	} catch (error) {
 		console.error("Signup Error:", error.message);
@@ -70,7 +71,7 @@ const login = async (req, res) => {
 		res.cookie("jwt", token, {
 			maxAge: 15 * 24 * 60 * 60 * 1000,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 
@@ -78,6 +79,7 @@ const login = async (req, res) => {
 			_id: user._id,
 			name: user.name,
 			email: user.email,
+			role: user.role,
 		});
 	} catch (error) {
 		console.error("Login Error:", error.message);
@@ -90,7 +92,7 @@ const logout = (req, res) => {
 		res.cookie("jwt", "", {
 			maxAge: 0,
 			httpOnly: true,
-			sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+			sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
 			secure: process.env.NODE_ENV === "production",
 		});
 		res.status(200).json({ message: "Logged out successfully" });
