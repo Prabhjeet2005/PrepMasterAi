@@ -1,22 +1,21 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-	/* config options here */
 	reactCompiler: true,
+
+	// 1. The Webpack rule for local development
 	webpack: (config) => {
-		// Tells Webpack to ignore the broken @mediapipe/hands module since we use the TFJS runtime
 		config.resolve.alias = {
 			...config.resolve.alias,
 			"@mediapipe/hands": false,
 		};
 		return config;
 	},
-	// ✅ FIX: Tell Turbopack to apply the exact same fallbacks for production!
+
+	// 2. The exact same rule translated for Turbopack (Vercel Production)
 	experimental: {
 		turbopack: {
-			resolveFallback: {
-				fs: false,
-				path: false,
-				crypto: false,
+			resolveAlias: {
+				"@mediapipe/hands": false,
 			},
 		},
 	},
