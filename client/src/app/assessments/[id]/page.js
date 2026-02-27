@@ -70,8 +70,8 @@ export default function AssessmentEnvironment() {
 	const [isAiReady, setIsAiReady] = useState(false);
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [isAiLoadingDelay, setIsAiLoadingDelay] = useState(false);
+	const [isCalibratingAudio, setIsCalibratingAudio] = useState(false);
 
-	
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -80,17 +80,22 @@ export default function AssessmentEnvironment() {
 	const isSubmittingRef = useRef(isSubmitting);
 	const showWarningModalRef = useRef(showWarningModal);
 	const socketRef = useRef(null);
-	
+
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
 	const warningsRef = useRef(0);
-	
+
 	const faceDetectionIntervalRef = useRef(null);
 	const lookAwayTimerRef = useRef(0);
 	const anchorDescriptorRef = useRef(null); // Stores the original face identity
 	const latestMobileDescriptorRef = useRef(null);
 	const laptopObjectDetectorRef = useRef(null);
-	
+
+	const audioContextRef = useRef(null);
+	const analyserRef = useRef(null);
+	const audioThresholdRef = useRef(35); // Default fallback threshold
+	const audioStrikeTimerRef = useRef(0);
+
 	// Triggers a 5-second lock on the Step 3 button when they enter the step
 	useEffect(() => {
 		if (setupStep === 3) {
@@ -100,6 +105,60 @@ export default function AssessmentEnvironment() {
 		}
 	}, [setupStep]);
 
+	// ==========================================
+	// AMBIENT ROOM AUDIO CALIBRATOR
+	// ==========================================
+	useEffect(() => {
+		if (setupStep === 3 && laptopStream && !audioContextRef.current) {
+			try {
+				const AudioContext =
+					window.AudioContext || window.webkitAudioContext;
+				const audioContext = new AudioContext();
+				const source = audioContext.createMediaStreamSource(laptopStream);
+				const analyser = audioContext.createAnalyser();
+				analyser.fftSize = 256;
+				source.connect(analyser);
+
+				audioContextRef.current = audioContext;
+				analyserRef.current = analyser;
+
+				// Start a 3-second calibration loop
+				setIsCalibratingAudio(true);
+				const samples = [];
+				const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+				const calibrationInterval = setInterval(() => {
+					analyser.getByteFrequencyData(dataArray);
+					// THE FIX: fftSize is 256, meaning 128 bins. Each bin is ~172Hz.
+					// Bins 2 through 17 represent ~344Hz to ~2924Hz (The exact human vocal range)
+					let voiceSum = 0;
+					for (let i = 2; i < 18; i++) {
+						voiceSum += dataArray[i];
+					}
+					const voiceAverage = voiceSum / 16;
+					samples.push(voiceAverage);
+				}, 100);
+
+				setTimeout(() => {
+					clearInterval(calibrationInterval);
+					const avgBaseline =
+						samples.reduce((a, b) => a + b, 0) / samples.length;
+
+					// THE FIX: Increased the safety margin to +20, and raised the cap to 80
+					// to easily accommodate noisy environments without false-flagging.
+					const customThreshold = Math.min(avgBaseline + 20, 80);
+					audioThresholdRef.current = customThreshold;
+
+					console.log(
+						`🎤 Voice Audio Calibrated! Baseline: ${avgBaseline.toFixed(1)}, Custom Threshold: ${customThreshold.toFixed(1)}`,
+					);
+					setIsCalibratingAudio(false);
+				}, 3000);
+			} catch (err) {
+				console.error("Audio Calibration Failed:", err);
+			}
+		}
+	}, [setupStep, laptopStream]);
 
 	useEffect(() => {
 		codeRef.current = code;
@@ -322,119 +381,180 @@ export default function AssessmentEnvironment() {
 	// ==========================================
 	// AI VISION ENGINE: LAPTOP FACE TRACKING
 	// ==========================================
-useEffect(() => {
-	// THE FIX: We no longer wait for the camera or Step 3 to start downloading models.
-	// They will download in the background during Step 1 and 2.
-	const loadAiModels = async () => {
-		try {
-			if (!faceapi) {
-				const module = await import("@vladmandic/face-api");
-				faceapi = module.default || module;
-			}
+	useEffect(() => {
+		// THE FIX: We no longer wait for the camera or Step 3 to start downloading models.
+		// They will download in the background during Step 1 and 2.
+		const loadAiModels = async () => {
+			try {
+				if (!faceapi) {
+					const module = await import("@vladmandic/face-api");
+					faceapi = module.default || module;
+				}
 
-			// ✅ ADD THIS BLOCK
-			if (!cocoSsd) {
-				const tf = await import("@tensorflow/tfjs");
-				await tf.ready();
-				const cocoModule = await import("@tensorflow-models/coco-ssd");
-				cocoSsd = cocoModule.default || cocoModule;
-			}
+				// ✅ ADD THIS BLOCK
+				if (!cocoSsd) {
+					const tf = await import("@tensorflow/tfjs");
+					await tf.ready();
+					const cocoModule = await import("@tensorflow-models/coco-ssd");
+					cocoSsd = cocoModule.default || cocoModule;
+				}
 
-			const MODEL_URL =
-				"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
-			await Promise.all([
-				faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-				faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-				faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-			]);
+				const MODEL_URL =
+					"https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+				await Promise.all([
+					faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+					faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+					faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+				]);
 
-			// ✅ ADD THIS LINE
-			laptopObjectDetectorRef.current = await cocoSsd.load();
+				// ✅ ADD THIS LINE
+				laptopObjectDetectorRef.current = await cocoSsd.load();
 
-			console.log("✅ Local Browser AI Vision & Object Detection Loaded");
-			setIsAiReady(true);
-		} catch (err) {
-			console.error("AI Model Load Error:", err);
-		}
-	};
-
-	if (!isAiReady) loadAiModels();
-}, [isAiReady]);
-
-useEffect(() => {
-	// Only run continuous tracking AFTER the test has officially started
-	if (!isAiReady || !hasStarted || !faceapi) return;
-
-	const video = laptopVideoRef.current;
-
-	faceDetectionIntervalRef.current = setInterval(async () => {
-		if (showWarningModalRef.current || isSubmittingRef.current) return;
-		if (!video || video.paused || video.ended || video.readyState !== 4)
-			return;
-
-		const detections = await faceapi
-			.detectAllFaces(
-				video,
-				new faceapi.TinyFaceDetectorOptions({
-					inputSize: 224,
-					scoreThreshold: 0.5,
-				}),
-			)
-			.withFaceLandmarks()
-			.withFaceDescriptors();
-
-		const faceCount = detections.length;
-
-		if (faceCount === 0) {
-			lookAwayTimerRef.current += 1;
-			if (lookAwayTimerRef.current >= 3) {
-				handleViolation("Candidate's face is not visible in the frame.");
-				lookAwayTimerRef.current = 0;
-			}
-		} else if (faceCount > 1) {
-			handleViolation(
-				"Multiple faces detected! Unauthorized assistance suspected.",
-			);
-			lookAwayTimerRef.current = 0;
-		} else if (faceCount === 1) {
-			lookAwayTimerRef.current = 0;
-
-			// Ensure the current person matches the person who started the test
-			if (anchorDescriptorRef.current) {
-				const distance = faceapi.euclideanDistance(
-					anchorDescriptorRef.current,
-					detections[0].descriptor,
+				console.log(
+					"✅ Local Browser AI Vision & Object Detection Loaded",
 				);
-				if (distance > 0.65) {
+				setIsAiReady(true);
+			} catch (err) {
+				console.error("AI Model Load Error:", err);
+			}
+		};
+
+		if (!isAiReady) loadAiModels();
+	}, [isAiReady]);
+
+	useEffect(() => {
+		// Only run continuous tracking AFTER the test has officially started
+		if (!isAiReady || !hasStarted || !faceapi) return;
+
+		const video = laptopVideoRef.current;
+
+		faceDetectionIntervalRef.current = setInterval(async () => {
+			if (showWarningModalRef.current || isSubmittingRef.current) return;
+			if (!video || video.paused || video.ended || video.readyState !== 4)
+				return;
+
+			const detections = await faceapi
+				.detectAllFaces(
+					video,
+					new faceapi.TinyFaceDetectorOptions({
+						inputSize: 224,
+						scoreThreshold: 0.5,
+					}),
+				)
+				.withFaceLandmarks()
+				.withFaceDescriptors();
+
+			const faceCount = detections.length;
+
+			if (faceCount === 0) {
+				lookAwayTimerRef.current += 1;
+				if (lookAwayTimerRef.current >= 3) {
+					handleViolation("Candidate's face is not visible in the frame.");
+					lookAwayTimerRef.current = 0;
+				}
+			} else if (faceCount > 1) {
+				handleViolation(
+					"Multiple faces detected! Unauthorized assistance suspected.",
+				);
+				lookAwayTimerRef.current = 0;
+			} else if (faceCount === 1) {
+				lookAwayTimerRef.current = 0;
+
+				// 1. Identity Check
+				if (anchorDescriptorRef.current) {
+					const distance = faceapi.euclideanDistance(
+						anchorDescriptorRef.current,
+						detections[0].descriptor,
+					);
+					if (distance > 0.65) {
+						handleViolation(
+							"Identity mismatch! Different person detected on laptop camera.",
+						);
+					}
+				}
+
+				// 2. AUDIO ANOMALY & LIP SYNC CHECKER
+				const landmarks = detections[0].landmarks.positions;
+				const upperLip = landmarks[62]; // Inner top lip
+				const lowerLip = landmarks[66]; // Inner bottom lip
+				const lipDistance = Math.abs(lowerLip.y - upperLip.y);
+
+				const isLipsMoving = lipDistance > 5; // If gap is > 5px, they are talking out loud
+
+				let currentVoiceLevel = 0;
+				let isVoiceDominant = false;
+
+				if (analyserRef.current) {
+					const dataArray = new Uint8Array(
+						analyserRef.current.frequencyBinCount,
+					);
+					analyserRef.current.getByteFrequencyData(dataArray);
+
+					let voiceSum = 0;
+					let noiseSum = 0;
+					let noiseBinCount = 0;
+
+					// Bins 2-17 are vocal range (approx 300Hz - 3000Hz).
+					// Bins 0-1 (bass) and 18-40 (mid-treble) are our reference noise floor.
+					// THE FIX: We stop checking at bin 40 because super-high frequencies are naturally quiet and ruin the average.
+					for (let i = 0; i < 40; i++) {
+						if (i >= 2 && i <= 17) {
+							voiceSum += dataArray[i];
+						} else {
+							noiseSum += dataArray[i];
+							noiseBinCount++;
+						}
+					}
+
+					currentVoiceLevel = voiceSum / 16;
+					const backgroundNoiseLevel = noiseSum / noiseBinCount;
+
+					// SNR Check: Voice must be distinctly louder (+25) than the adjacent background noise.
+					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 25;
+				}
+
+				// If vocal frequencies spike above threshold, AND they stand out from background noise, AND lips are shut:
+				if (
+					currentVoiceLevel > audioThresholdRef.current &&
+					isVoiceDominant &&
+					!isLipsMoving
+				) {
+					audioStrikeTimerRef.current += 1;
+
+					if (audioStrikeTimerRef.current >= 4) {
+						handleViolation(
+							"Unusual background audio detected while lips were closed. Off-camera assistance suspected.",
+						);
+						audioStrikeTimerRef.current = 0; // Reset after striking
+					}
+				} else {
+					audioStrikeTimerRef.current = 0;
+				}
+
+			}
+
+			if (laptopObjectDetectorRef.current) {
+				const predictions =
+					await laptopObjectDetectorRef.current.detect(video);
+				const forbiddenItems = ["cell phone", "book"]; // Only looking for obvious cheating items held up to the screen
+
+				const violation = predictions.find(
+					(p) => forbiddenItems.includes(p.class) && p.score > 0.5,
+				);
+
+				if (violation) {
 					handleViolation(
-						"Identity mismatch! Different person detected on laptop camera.",
+						`Forbidden object detected on screen camera: ${violation.class}`,
 					);
 				}
 			}
-		}
+		}, 1500);
 
-		if (laptopObjectDetectorRef.current) {
-			const predictions =
-				await laptopObjectDetectorRef.current.detect(video);
-			const forbiddenItems = ["cell phone", "book"]; // Only looking for obvious cheating items held up to the screen
-
-			const violation = predictions.find(
-				(p) => forbiddenItems.includes(p.class) && p.score > 0.5,
-			);
-
-			if (violation) {
-				handleViolation(
-					`Forbidden object detected on screen camera: ${violation.class}`,
-				);
-			}
-		}
-	}, 1500);
-
-	return () => {
-		if (faceDetectionIntervalRef.current)
-			clearInterval(faceDetectionIntervalRef.current);
-	};
-}, [hasStarted, isAiReady]);
+		return () => {
+			if (faceDetectionIntervalRef.current)
+				clearInterval(faceDetectionIntervalRef.current);
+		};
+	}, [hasStarted, isAiReady]);
 
 	// ==========================================
 	// BULLETPROOF PROCTORING ENGINE
@@ -510,7 +630,7 @@ useEffect(() => {
 	};
 
 	const handleViolation = (reason) => {
-		if (isSubmittingRef.current) return;
+		if (isSubmittingRef.current || showWarningModalRef.current) return;
 		const now = Date.now();
 		if (now - lastViolationTime.current < 2000) return;
 		lastViolationTime.current = now;
@@ -662,7 +782,6 @@ useEffect(() => {
 			}, 1000);
 		}
 	};
-
 
 	const startAssessment = async () => {
 		if (!faceapi) {
@@ -1027,6 +1146,17 @@ useEffect(() => {
 											<Camera size={18} className="text-blue-400" />{" "}
 											Primary Camera (Laptop)
 										</h3>
+										{/* ✅ NEW AUDIO CALIBRATION UI */}
+										{isCalibratingAudio ? (
+											<span className="flex items-center gap-2 text-xs font-bold text-yellow-500 bg-yellow-900/30 px-2 py-1 rounded-full animate-pulse">
+												<Loader2 size={12} className="animate-spin" />{" "}
+												Calibrating Audio...
+											</span>
+										) : (
+											<span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-900/30 px-2 py-1 rounded-full">
+												<CheckCircle2 size={12} /> Audio Ready
+											</span>
+										)}
 										<div className="w-full aspect-video bg-black rounded-xl overflow-hidden relative border border-slate-700">
 											{laptopStream ? (
 												<video

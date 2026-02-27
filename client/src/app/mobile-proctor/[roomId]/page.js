@@ -22,6 +22,7 @@ export default function MobileProctorPage() {
 	const handModelRef = useRef(null);
 	const missingHandsTimerRef = useRef(0);
 	const isGracePeriodRef = useRef(true);
+	const isAiReadyRef = useRef(false);
 
 	// Disarm the grace period 3 seconds after successfully pairing
 	useEffect(() => {
@@ -180,6 +181,7 @@ export default function MobileProctorPage() {
 				);
 
 				console.log("✅ Mobile AI Identity & Object Models Loaded");
+				isAiReadyRef.current = true;
 			} catch (e) {
 				console.error("Mobile Model load error", e);
 			}
@@ -202,6 +204,14 @@ export default function MobileProctorPage() {
 				isScanning
 			) {
 				scheduleNextScan(3000); // Retry soon if busy
+				return;
+			}
+			
+			if (!isAiReadyRef.current) {
+				console.log(
+					"[AI] Models still downloading... checking again in 2 seconds.",
+				);
+				scheduleNextScan(2000);
 				return;
 			}
 

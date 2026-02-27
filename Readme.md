@@ -108,6 +108,7 @@ The phone scans it, joins the room, and the devices can now talk to each other i
 # TODO: Exact PDF Store For Which Mock Interview Took Place
 # 1 User Attempt Assessment once
 # TODO: Add Same Face Check in Phone
+# Screen Sharing Should not be happening so someone can't be on a call
 
 
 
