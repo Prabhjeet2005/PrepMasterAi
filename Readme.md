@@ -105,9 +105,9 @@ The phone scans it, joins the room, and the devices can now talk to each other i
 
 4. Network Resilience: What happens if the socket disconnects for 2 seconds due to bad Wi-Fi? You need a reconnection protocol that pauses the timer and puts up a "Reconnecting..." screen instead of instantly failing them.
 
-# TODO: Exact PDF Store For Which Mock Interview Took Place
-# 1 User Attempt Assessment once
-# TODO: Add Same Face Check in Phone
+# TODO: add view Exact PDF Store For Which Mock Interview Took Place, so user know resume also for which they were interviewed and display in their performance report with eye button
+# 1 User can Attempt Assessment only once
+# Assessment Deadline
 # Screen Sharing Should not be happening so someone can't be on a call
 
 

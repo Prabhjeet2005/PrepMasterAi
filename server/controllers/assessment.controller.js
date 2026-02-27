@@ -155,7 +155,7 @@ const executeCode = async (req, res) => {
 const submitAssessment = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const { mcqAnswers, code, language } = req.body;
+		const { mcqAnswers, code, language, warnings, proctoringLogs } = req.body;
 
 		// 1. Fetch the FULL assessment (including hidden test cases and answers)
 		const assessment = await Assessment.findById(id);
@@ -239,6 +239,8 @@ const submitAssessment = async (req, res) => {
 			mcqAnswers,
 			submittedCode: code,
 			testCaseResults,
+			warnings: warnings || 0,
+			proctoringLogs: proctoringLogs || [],
 		});
 
 		await result.save();

@@ -146,13 +146,18 @@ const setupSocket = (io) => {
 		});
 
 		// 3. Mobile detects a violation and alerts the laptop
-		socket.on("mobile_violation_detected", ({ roomId, reason }) => {
-			console.log(
-				`[Proctor Socket] Mobile Violation in ${roomId}: ${reason}`,
-			);
-			// Send the strike directly to the laptop
-			socket.to(roomId).emit("trigger_laptop_strike", reason);
-		});
+		socket.on(
+			"mobile_violation_detected",
+			({ roomId, reason, evidence }) => {
+				console.log(
+					`[Proctor Socket] Mobile Violation in ${roomId}: ${reason}`,
+				);
+				// Send the strike AND the image directly to the laptop
+				socket
+					.to(roomId)
+					.emit("trigger_laptop_strike", { reason, evidence });
+			},
+		);
 
 		// Relay face mathematics from mobile to laptop
 		socket.on("send_mobile_face_descriptor", ({ roomId, descriptor }) => {

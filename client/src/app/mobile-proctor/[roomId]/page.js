@@ -21,6 +21,7 @@ export default function MobileProctorPage() {
 	const objectDetectorRef = useRef(null);
 	const handModelRef = useRef(null);
 	const missingHandsTimerRef = useRef(0);
+	const missingFaceTimerRef = useRef(0);
 	const isGracePeriodRef = useRef(true);
 	const isAiReadyRef = useRef(false);
 
@@ -97,7 +98,11 @@ export default function MobileProctorPage() {
 			const startCamera = async () => {
 				try {
 					const stream = await navigator.mediaDevices.getUserMedia({
-						video: { facingMode: "user" },
+						video: {
+							facingMode: "user",
+							width: { ideal: 1280 },
+							height: { ideal: 720 },
+						},
 						audio: false,
 					});
 					streamRef.current = stream;
@@ -206,7 +211,7 @@ export default function MobileProctorPage() {
 				scheduleNextScan(3000); // Retry soon if busy
 				return;
 			}
-			
+
 			if (!isAiReadyRef.current) {
 				console.log(
 					"[AI] Models still downloading... checking again in 2 seconds.",
@@ -223,9 +228,34 @@ export default function MobileProctorPage() {
 				video.height = video.videoHeight;
 			}
 
-			// Default to standard random polling to save battery (10s to 15s)
-			let nextDelay =
-				Math.floor(Math.random() * (12000 - 5000 + 1)) + 10000;
+			// Faster polling (3 to 7 seconds) won't choke the CPU but catches cheaters faster.
+			let nextDelay = Math.floor(Math.random() * (7000 - 3000 + 1)) + 5000;
+
+			const captureEvidence = (vid, bbox = null, label = "") => {
+				const canvas = document.createElement("canvas");
+				canvas.width = vid.videoWidth;
+				canvas.height = vid.videoHeight;
+				const ctx = canvas.getContext("2d");
+				ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+				if (bbox) {
+					ctx.strokeStyle = "red";
+					ctx.lineWidth = 4;
+					ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+					ctx.fillStyle = "red";
+					ctx.font = "bold 24px Arial";
+					ctx.fillText(label.toUpperCase(), bbox[0], bbox[1] - 10);
+				} else if (label) {
+					// Draw large red text banner at the top if there is no bounding box
+					ctx.fillStyle = "rgba(220, 38, 38, 0.85)";
+					ctx.fillRect(0, 20, canvas.width, 50);
+					ctx.fillStyle = "white";
+					ctx.font = "bold 28px Arial";
+					ctx.textAlign = "center";
+					ctx.fillText(label.toUpperCase(), canvas.width / 2, 55);
+				}
+				return canvas.toDataURL("image/jpeg", 0.4); // Compress for socket transit
+			};
 
 			// =====================================
 			// 1. FACE IDENTITY SCANNER
@@ -237,7 +267,7 @@ export default function MobileProctorPage() {
 							video,
 							new faceapi.TinyFaceDetectorOptions({
 								inputSize: 224,
-								scoreThreshold: 0.5,
+								scoreThreshold: 0.3,
 							}),
 						)
 						.withFaceLandmarks()
@@ -248,10 +278,37 @@ export default function MobileProctorPage() {
 							roomId,
 							descriptor: Array.from(detection.descriptor),
 						});
+						missingFaceTimerRef.current = 0; // Reset timer if face is found
+					} else {
+						missingFaceTimerRef.current += 1;
+
+						// Soft warning at ~10 seconds of obstruction
+						if (missingFaceTimerRef.current === 2) {
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
+							});
+						}
+						// Strike at ~20+ seconds of obstruction
+						else if (missingFaceTimerRef.current >= 3) {
+							const evidence = captureEvidence(
+								video,
+								null,
+								"CAMERA OBSTRUCTED",
+							);
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"Secondary camera obstructed or candidate missing for a prolonged period.",
+								evidence,
+							});
+							missingFaceTimerRef.current = 0;
+						}
 					}
 				}
 			} catch (err) {
-				console.warn("Face AI Skipped this tick:", err.message);
+				console.warn("Face AI Skipped:", err.message);
 			}
 
 			// =====================================
@@ -265,58 +322,75 @@ export default function MobileProctorPage() {
 
 					const violation = predictions.find((p) => {
 						if (!forbiddenItems.includes(p.class)) return false;
+						// ✅ FIX: Lowered phone confidence to 0.15 so it catches phones even when heavily covered by your hand
 						const requiredConfidence =
-							p.class === "cell phone" || p.class === "remote" ? 0.3 : 0.5;
+							p.class === "cell phone" || p.class === "remote"
+								? 0.45
+								: 0.5;
 						return p.score > requiredConfidence;
 					});
 
 					if (violation) {
+						const evidence = captureEvidence(
+							video,
+							violation.bbox,
+							violation.class,
+						);
 						socketRef.current.emit("mobile_violation_detected", {
 							roomId,
 							reason: `Forbidden object detected: ${violation.class}`,
+							evidence,
 						});
 					}
 				}
 			} catch (err) {
-				console.warn("Object AI Skipped this tick:", err.message);
+				console.warn("Object AI Skipped:", err.message);
 			}
 
 			// =====================================
-			// 3. HAND TRACKING (DYNAMIC FAST-POLLING)
+			// 3. HAND TRACKING (WITH SOFT WARNING)
 			// =====================================
 			try {
 				if (handModelRef.current) {
 					const hands = await handModelRef.current.estimateHands(video);
-					console.log(`[AI] Hands currently visible: ${hands.length}`);
 
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// 3 strikes in fast-poll mode = ~4.5 seconds of missing hands
-						if (missingHandsTimerRef.current >= 3) {
+						// ✅ FIX: Soft warning at ~3 seconds
+						if (missingHandsTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
-									"Both hands must remain fully visible on the desk area.",
+									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
+							});
+							nextDelay = 1500;
+						}
+						// ✅ FIX: Hard Strike at ~6 seconds
+						else if (missingHandsTimerRef.current >= 4) {
+							const evidence = captureEvidence(
+								video,
+								null,
+								"HAND(S) MISSING",
+							);
+							socketRef.current.emit("mobile_violation_detected", {
+								roomId,
+								reason:
+									"Hand(s) Missing: Please keep both hands clearly visible on your desk.",
+								evidence,
 							});
 							missingHandsTimerRef.current = 0;
 						} else {
-							// THE FIX: Anomaly detected! Drop the delay to 1.5 seconds to rapid-verify!
 							nextDelay = 1500;
-							console.warn(
-								`[AI] Suspicious activity! Verifying hands again in 1.5s... (Attempt ${missingHandsTimerRef.current}/3)`,
-							);
 						}
 					} else {
-						// Hands are visible. Reset the strike counter and let it go back to the 15s sleep.
 						missingHandsTimerRef.current = 0;
 					}
 				}
 			} catch (err) {
-				console.warn("Hand AI Skipped this tick:", err.message);
+				console.warn("Hand AI Skipped:", err.message);
 			}
 
-			// Unlock and schedule the next sweep using our dynamic delay
 			isScanning = false;
 			scheduleNextScan(nextDelay);
 		};
