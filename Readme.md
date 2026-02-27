@@ -96,9 +96,19 @@ The phone scans it, joins the room, and the devices can now talk to each other i
 
 - Our Solution: The phone placement instructions must tell the user to place the phone at a ~45-degree angle so at least one eye and the nose are clearly visible to the phone's camera.
 
+# Next TODO:
+1. Audio Anomaly Detection (Microphone): Cheaters often have someone sitting off-camera reading answers to them. You don't need transcription; you just need the Web Audio API to create an AnalyserNode. If the decibel level crosses a certain threshold for more than 3 seconds (indicating talking, not just typing), it fires an "Unusual Audio Detected" strike.
+
+2. The Recruiter Dashboard (Crucial): A proctoring system is useless if nobody can review the strikes. You need a dashboard where a recruiter can click on a candidate's test and see a timeline of every strike they received, the exact timestamp, and the reason.
+
+3. Snapshot Evidence: When a strike is fired (e.g., "Phone Detected"), grab a base64 snapshot of the ```<video>``` feed and send it to your backend. Showing the interviewer a dashboard with photographic proof of the cheating will blow their minds.
+
+4. Network Resilience: What happens if the socket disconnects for 2 seconds due to bad Wi-Fi? You need a reconnection protocol that pauses the timer and puts up a "Reconnecting..." screen instead of instantly failing them.
 
 # TODO: Exact PDF Store For Which Mock Interview Took Place
 # 1 User Attempt Assessment once
 # TODO: Add Same Face Check in Phone
+
+
 
 
