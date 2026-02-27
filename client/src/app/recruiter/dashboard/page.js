@@ -412,7 +412,7 @@ export default function RecruiterDashboard() {
 						</div>
 
 						<div className="border-4 border-slate-800 rounded-2xl rounded-tl-none overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] bg-black w-full">
-							<img
+							 <img
 								src={selectedEvidence}
 								alt="Violation Evidence"
 								className="w-full h-auto max-h-[80vh] object-contain"

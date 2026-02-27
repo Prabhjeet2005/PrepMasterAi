@@ -49,10 +49,9 @@ export default function AssessmentsListPage() {
 					(historyItem) => historyItem.assessmentId._id,
 				);
 
-				// Filter assessments into two separate buckets
-				const available = allAssessments.filter(
-					(a) => !completedIds.includes(a._id),
-				);
+				// ✅ TEMPORARY HACK: Disabled the filter so you can take tests infinitely during development!
+				// const available = allAssessments.filter(a => !completedIds.includes(a._id));
+				const available = allAssessments;
 
 				setAvailableAssessments(available);
 				setCompletedAssessments(userHistory);

@@ -1,6 +1,7 @@
 const Assessment = require("../models/assessment.model.js");
 const AssessmentResult = require("../models/assessmentResult.model.js");
 const axios = require("axios");
+const { uploadBase64Image } = require("../utils/cloudinary");
 
 // 1. Create a new Assessment (Admin/Recruiter)
 const createAssessment = async (req, res) => {
@@ -155,7 +156,8 @@ const executeCode = async (req, res) => {
 const submitAssessment = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const { mcqAnswers, code, language, warnings, proctoringLogs } = req.body;
+		const { mcqAnswers, code, language, warnings, proctoringLogs } =
+			req.body;
 
 		// 1. Fetch the FULL assessment (including hidden test cases and answers)
 		const assessment = await Assessment.findById(id);
@@ -229,7 +231,30 @@ const submitAssessment = async (req, res) => {
 
 		const totalScore = mcqScore + dsaScore;
 
-		// 4. Save to Database
+		// 4. PROCESS PROCTORING LOGS & UPLOAD EVIDENCE TO CLOUD
+		const processedLogs = [];
+		if (proctoringLogs && proctoringLogs.length > 0) {
+			for (const log of proctoringLogs) {
+				let finalEvidenceUrl = log.evidence;
+
+				// If the evidence is a massive Base64 string, upload it!
+				if (
+					finalEvidenceUrl &&
+					finalEvidenceUrl.startsWith("data:image")
+				) {
+					const secureUrl = await uploadBase64Image(finalEvidenceUrl);
+					if (secureUrl) finalEvidenceUrl = secureUrl;
+				}
+
+				processedLogs.push({
+					timestamp: log.timestamp,
+					reason: log.reason,
+					evidence: finalEvidenceUrl, // Now a tiny Cloudinary URL!
+				});
+			}
+		}
+
+		// 5. Save to Database
 		const result = new AssessmentResult({
 			userId: req.user._id,
 			assessmentId: assessment._id,
@@ -240,7 +265,7 @@ const submitAssessment = async (req, res) => {
 			submittedCode: code,
 			testCaseResults,
 			warnings: warnings || 0,
-			proctoringLogs: proctoringLogs || [],
+			proctoringLogs: processedLogs, // Save the cleaned logs!
 		});
 
 		await result.save();
