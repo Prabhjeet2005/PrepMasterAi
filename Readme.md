@@ -108,7 +108,6 @@ The phone scans it, joins the room, and the devices can now talk to each other i
 # TODO: add view Exact PDF Store For Which Mock Interview Took Place, so user know resume also for which they were interviewed and display in their performance report with eye button
 # 1 User can Attempt Assessment only once
 # Assessment Deadline
-# Screen Sharing Should not be happening so someone can't be on a call
 
 
 
