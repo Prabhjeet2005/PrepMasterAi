@@ -39,8 +39,7 @@ export default function MobileProctorPage() {
 		const socket = socketRef.current;
 
 		socket.on("connect", () => {
-			socket.emit("mobile_join_room", roomId);
-			setStatus("paired");
+			setStatus("ready_to_pair");
 		});
 
 		socket.on("connect_error", () => setStatus("error"));
@@ -51,19 +50,8 @@ export default function MobileProctorPage() {
 				streamRef.current.getTracks().forEach((track) => track.stop());
 		});
 
-		// ✅ FIX FOR BUG 1: Aggressively re-request WakeLock to stop iOS screen dimming
-		const requestWakeLock = async () => {
-			try {
-				if ("wakeLock" in navigator)
-					await navigator.wakeLock.request("screen");
-			} catch (err) {}
-		};
-		requestWakeLock();
-		const wakeLockInterval = setInterval(requestWakeLock, 15000);
-
-		// ✅ FIX FOR BUG 2: Aggressive 20-second heartbeat to bypass load balancer timeouts
 		const heartbeatInterval = setInterval(() => {
-			if (socket.connected) socket.emit("ping");
+			if (socket.connected) socket.emit("mobile_keep_alive");
 		}, 20000);
 
 		return () => {
@@ -73,21 +61,52 @@ export default function MobileProctorPage() {
 		};
 	}, [roomId]);
 
+	// ✅ NEW: The function that legally grabs the WakeLock via a physical user tap
+	const handlePairDevice = async () => {
+		try {
+			// Apple explicitly requires a physical screen tap to grant this lock!
+			if ("wakeLock" in navigator) {
+				await navigator.wakeLock.request("screen");
+
+				// Keep requesting it in the background just in case iOS drops it
+				setInterval(async () => {
+					try {
+						if (document.visibilityState === "visible")
+							await navigator.wakeLock.request("screen");
+					} catch (e) {}
+				}, 15000);
+			}
+		} catch (err) {
+			console.warn("WakeLock denied:", err);
+		}
+
+		// Now that the screen is permanently awake, tell the laptop we are ready!
+		if (socketRef.current) {
+			socketRef.current.emit("mobile_join_room", roomId);
+		}
+		setStatus("paired");
+	};
+
 	// ✅ FIX FOR BUG 1: Downgrade backgrounding to a Soft Warning and hijack the WakeLock
 	useEffect(() => {
-		const handleVisibilityChange = async () => {
-			if (document.hidden) {
-				// If the screen dims, just give a soft warning instead of killing the session
-				if (status === "paired" && socketRef.current && !isGracePeriodRef.current) {
-					socketRef.current.emit("mobile_violation_detected", {
-						roomId,
-						reason: "SOFT_WARNING: Mobile screen dimmed. Please tap your phone to keep it awake.",
-					});
-				}
-			} else {
-				// When they tap the screen to wake it up, use that gesture to legally grab the WakeLock!
+		const handleVisibilityChange = () => {
+			if (
+				document.hidden &&
+				status === "paired" &&
+				socketRef.current &&
+				!isGracePeriodRef.current
+			) {
+				// ✅ FIX: Downgraded instant kill to a Soft Warning for screen dimming
+				socketRef.current.emit("mobile_violation_detected", {
+					roomId,
+					reason:
+						"SOFT_WARNING: Mobile screen dimmed. Please tap your phone to keep it awake.",
+				});
+			} else if (!document.hidden && status === "paired") {
+				// Re-grab the lock when they tap the screen to wake it up!
 				try {
-					if ("wakeLock" in navigator) await navigator.wakeLock.request("screen");
+					if ("wakeLock" in navigator)
+						navigator.wakeLock.request("screen");
 				} catch (e) {}
 			}
 		};
@@ -326,7 +345,7 @@ export default function MobileProctorPage() {
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
 							nextDelay = 4000;
-						} else if (missingFaceTimerRef.current >= 4) {
+						} else if (missingFaceTimerRef.current >= 5) {
 							const evidence = captureEvidence(
 								frameCanvas,
 								null,
@@ -403,7 +422,7 @@ export default function MobileProctorPage() {
 									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
 							});
 							nextDelay = 4000;
-						} else if (missingHandsTimerRef.current >= 5) {
+						} else if (missingHandsTimerRef.current >= 6) {
 							const evidence = captureEvidence(
 								frameCanvas,
 								null,
@@ -455,6 +474,27 @@ export default function MobileProctorPage() {
 				<div className="flex flex-col items-center animate-pulse">
 					<Loader2 size={64} className="text-blue-500 animate-spin mb-6" />
 					<h1 className="text-2xl font-bold mb-2">Connecting...</h1>
+				</div>
+			)}
+
+			{/* ✅ NEW: The UI state that forces the user to tap the screen */}
+			{status === "ready_to_pair" && (
+				<div className="flex flex-col items-center animate-in fade-in zoom-in duration-500">
+					<div className="w-24 h-24 bg-blue-900/30 text-blue-500 rounded-full flex items-center justify-center mb-6 border border-blue-500/50">
+						<ShieldAlert size={48} />
+					</div>
+					<h1 className="text-3xl font-black mb-2 text-white">
+						Device Found
+					</h1>
+					<p className="text-slate-300 mb-8 max-w-xs mx-auto">
+						To prevent your phone from sleeping during the exam, tap the
+						button below.
+					</p>
+					<button
+						onClick={handlePairDevice}
+						className="w-full max-w-xs px-6 py-4 rounded-xl font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-lg shadow-blue-900/20">
+						Start Connection
+					</button>
 				</div>
 			)}
 
