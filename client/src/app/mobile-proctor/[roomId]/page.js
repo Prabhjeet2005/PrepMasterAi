@@ -210,6 +210,7 @@ export default function MobileProctorPage() {
 		let isScanning = false;
 
 		// Recursive function to handle the AI scan
+		// Recursive function to handle the AI scan
 		const runAiScan = async () => {
 			if (
 				video.paused ||
@@ -241,15 +242,32 @@ export default function MobileProctorPage() {
 				video.height = video.videoHeight;
 			}
 
+			// ✅ THE IOS WEBKIT FIX: The Offscreen Canvas Buffer
+			// We snapshot the video frame once. This prevents iOS WebGL from crashing
+			// when multiple AI models try to access the live video texture simultaneously.
+			const frameCanvas = document.createElement("canvas");
+			frameCanvas.width = video.videoWidth;
+			frameCanvas.height = video.videoHeight;
+			const frameCtx = frameCanvas.getContext("2d", {
+				willReadFrequently: true,
+			});
+			frameCtx.drawImage(
+				video,
+				0,
+				0,
+				frameCanvas.width,
+				frameCanvas.height,
+			);
+
 			// Faster polling (3 to 7 seconds) won't choke the CPU but catches cheaters faster.
 			let nextDelay = Math.floor(Math.random() * (7000 - 3000 + 1)) + 5000;
 
-			const captureEvidence = (vid, bbox = null, label = "") => {
+			const captureEvidence = (sourceCanvas, bbox = null, label = "") => {
 				const canvas = document.createElement("canvas");
-				canvas.width = vid.videoWidth;
-				canvas.height = vid.videoHeight;
+				canvas.width = sourceCanvas.width;
+				canvas.height = sourceCanvas.height;
 				const ctx = canvas.getContext("2d");
-				ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+				ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
 
 				if (bbox) {
 					ctx.strokeStyle = "red";
@@ -259,7 +277,6 @@ export default function MobileProctorPage() {
 					ctx.font = "bold 24px Arial";
 					ctx.fillText(label.toUpperCase(), bbox[0], bbox[1] - 10);
 				} else if (label) {
-					// Draw large red text banner at the top if there is no bounding box
 					ctx.fillStyle = "rgba(220, 38, 38, 0.85)";
 					ctx.fillRect(0, 20, canvas.width, 50);
 					ctx.fillStyle = "white";
@@ -267,10 +284,10 @@ export default function MobileProctorPage() {
 					ctx.textAlign = "center";
 					ctx.fillText(label.toUpperCase(), canvas.width / 2, 55);
 				}
-				return canvas.toDataURL("image/jpeg", 0.4); // Compress for socket transit
+				return canvas.toDataURL("image/jpeg", 0.4);
 			};
 
-			// ✅ FIX FOR BUG 3: Start GPU Memory Scope to prevent the 5-minute Android freeze
+			// ✅ GPU Memory Scope to prevent the 5-minute Android freeze
 			if (tf) tf.engine().startScope();
 
 			// =====================================
@@ -278,12 +295,13 @@ export default function MobileProctorPage() {
 			// =====================================
 			try {
 				if (faceapi) {
+					// ✅ Pass the static frameCanvas instead of the live video
 					const detection = await faceapi
 						.detectSingleFace(
-							video,
+							frameCanvas,
 							new faceapi.TinyFaceDetectorOptions({
-								inputSize: 224, // ✅ RESTORED: High accuracy maintained
-								scoreThreshold: 0.3, // ✅ RESTORED: Strict confidence required
+								inputSize: 224,
+								scoreThreshold: 0.3,
 							}),
 						)
 						.withFaceLandmarks()
@@ -298,17 +316,16 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~16 seconds) = Strike.
 						if (missingFaceTimerRef.current === 1) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
-							nextDelay = 4000; // ✅ FIX: 4-second heartbeat prevents iOS thermal throttling
+							nextDelay = 4000;
 						} else if (missingFaceTimerRef.current >= 4) {
 							const evidence = captureEvidence(
-								video,
+								frameCanvas,
 								null,
 								"CAMERA OBSTRUCTED",
 							);
@@ -333,13 +350,13 @@ export default function MobileProctorPage() {
 			// =====================================
 			try {
 				if (objectDetectorRef.current) {
+					// ✅ Pass the static frameCanvas
 					const predictions =
-						await objectDetectorRef.current.detect(video);
+						await objectDetectorRef.current.detect(frameCanvas);
 					const forbiddenItems = ["cell phone", "book", "remote"];
 
 					const violation = predictions.find((p) => {
 						if (!forbiddenItems.includes(p.class)) return false;
-						// ✅ FIX: Lowered phone confidence to 0.15 so it catches phones even when heavily covered by your hand
 						const requiredConfidence =
 							p.class === "cell phone" || p.class === "remote"
 								? 0.45
@@ -349,7 +366,7 @@ export default function MobileProctorPage() {
 
 					if (violation) {
 						const evidence = captureEvidence(
-							video,
+							frameCanvas,
 							violation.bbox,
 							violation.class,
 						);
@@ -365,16 +382,17 @@ export default function MobileProctorPage() {
 			}
 
 			// =====================================
-			// 3. HAND TRACKING (WITH SOFT WARNING)
+			// 3. HAND TRACKING
 			// =====================================
 			try {
 				if (handModelRef.current) {
-					const hands = await handModelRef.current.estimateHands(video);
+					// ✅ Pass the static frameCanvas
+					const hands =
+						await handModelRef.current.estimateHands(frameCanvas);
 
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ STRICTNESS RESTORED: 2 Miss (~8 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
 						if (missingHandsTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
@@ -384,7 +402,7 @@ export default function MobileProctorPage() {
 							nextDelay = 4000;
 						} else if (missingHandsTimerRef.current >= 4) {
 							const evidence = captureEvidence(
-								video,
+								frameCanvas,
 								null,
 								"HAND(S) MISSING",
 							);
@@ -396,7 +414,7 @@ export default function MobileProctorPage() {
 							});
 							missingHandsTimerRef.current = 0;
 						} else {
-							nextDelay = 4000; // ✅ FIX: 4-second heartbeat
+							nextDelay = 4000;
 						}
 					} else {
 						missingHandsTimerRef.current = 0;
@@ -406,12 +424,12 @@ export default function MobileProctorPage() {
 				console.warn("Hand AI Skipped:", err.message);
 			}
 
-			// ✅ FIX FOR BUG 3: Clear all GPU Memory after scan
+			// ✅ Clear all GPU Memory after scan
 			if (tf) tf.engine().endScope();
 
 			isScanning = false;
 			scheduleNextScan(nextDelay);
-		};;;
+		};
 
 		// Accepts a dynamic delay parameter
 		const scheduleNextScan = (delay) => {
