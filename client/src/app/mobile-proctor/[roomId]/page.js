@@ -102,6 +102,8 @@ export default function MobileProctorPage() {
 							facingMode: "user",
 							width: { ideal: 1280 },
 							height: { ideal: 720 },
+							// ✅ FIX FOR iOS: Cap framerate to stop Apple's thermal throttling!
+							frameRate: { ideal: 10, max: 15 },
 						},
 						audio: false,
 					});
@@ -282,14 +284,14 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						// ✅ FIX: Soft warning toast at ~4 seconds
-						if (missingFaceTimerRef.current === 2) {
+						// ✅ FIX FOR iOS: Increased to 3 to absorb WebKit frame drops
+						if (missingFaceTimerRef.current === 3) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
-							nextDelay = 2000; // Speed up the retry loop slightly
+							nextDelay = 2000;
 						}
 						// ✅ FIX: Hard Strike at ~12 seconds
 						else if (missingFaceTimerRef.current >= 6) {
@@ -360,8 +362,8 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ FIX: Soft warning toast at ~4 seconds
-						if (missingHandsTimerRef.current === 2) {
+						// ✅ FIX FOR iOS: Increased to 3 to absorb WebKit frame drops
+						if (missingHandsTimerRef.current === 3) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
