@@ -16,20 +16,21 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
+// ✅ FIX: Dynamic CORS. In dev, 'true' reflects the exact IP making the request, allowing anything!
 app.use(
-	cors({
-		origin:
-			process.env.NODE_ENV === "production"
-				? [
-						"http://localhost:3000",
-						"http://192.168.1.5:3000",
-						"https://prep-master-ai-client.vercel.app",
-					]
-				: true, // <--- Allow requests from any URL (including Vercel)
-		methods: ["GET", "POST", "PUT", "DELETE"],
-		credentials: true,
-	}),
+  cors({
+    origin:
+      process.env.NODE_ENV === "production"
+        ? [
+            "http://localhost:3000",
+            "https://prep-master-ai-client.vercel.app", // Production Vercel Link
+          ]
+        : true, // <--- ALLOWS ALL IPs IN DEVELOPMENT
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+  }),
 );
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cookieParser());
@@ -48,12 +49,15 @@ app.use("/api/assessment", assessmentRoutes);
 // SOCKET
 const io = new Server(server, {
 	cors: {
-		origin: process.env.NODE_ENV === "production" ?[
-			"http://localhost:3000",
-			"http://192.168.1.5:3000",
-			"https://prep-master-ai-client.vercel.app",
-		]:true, // <--- Allow WebSockets from any URL
+		origin:
+			process.env.NODE_ENV === "production"
+				? [
+						"http://localhost:3000",
+						"https://prep-master-ai-client.vercel.app",
+					]
+				: true, // <--- ALLOWS ALL IPs IN DEVELOPMENT
 		methods: ["GET", "POST"],
+		credentials: true,
 	},
 });
 

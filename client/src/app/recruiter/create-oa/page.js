@@ -158,12 +158,15 @@ export default function CreateAssessmentPage() {
 					withCredentials: true,
 				},
 			);
-
+			
 			setShowSuccessModal(true);
-			router.push("/assessments");
+			setTimeout(() => {
+				router.push("/recruiter/dashboard");
+			}, 3000);
+
 		} catch (error) {
 			console.error("Publish failed", error);
-			toast.error("Failed to publish assessment.");
+			toast.error("Failed to publish assessment. Ensure All Fields Are Filled");
 		} finally {
 			setIsSubmitting(false);
 		}

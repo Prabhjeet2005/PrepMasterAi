@@ -267,7 +267,7 @@ export default function MobileProctorPage() {
 							video,
 							new faceapi.TinyFaceDetectorOptions({
 								inputSize: 224,
-								scoreThreshold: 0.3,
+								scoreThreshold: 0.2, // ✅ FIX: Lowered from 0.3 to 0.2 to catch faces further away
 							}),
 						)
 						.withFaceLandmarks()
@@ -278,20 +278,21 @@ export default function MobileProctorPage() {
 							roomId,
 							descriptor: Array.from(detection.descriptor),
 						});
-						missingFaceTimerRef.current = 0; // Reset timer if face is found
+						missingFaceTimerRef.current = 0;
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						// Soft warning at ~10 seconds of obstruction
-						if (missingFaceTimerRef.current === 4) {
+						// ✅ FIX: Soft warning toast at ~4 seconds
+						if (missingFaceTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
+							nextDelay = 2000; // Speed up the retry loop slightly
 						}
-						// Strike at ~20+ seconds of obstruction
-						else if (missingFaceTimerRef.current >= 7) {
+						// ✅ FIX: Hard Strike at ~12 seconds
+						else if (missingFaceTimerRef.current >= 6) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -304,6 +305,8 @@ export default function MobileProctorPage() {
 								evidence,
 							});
 							missingFaceTimerRef.current = 0;
+						} else {
+							nextDelay = 2000;
 						}
 					}
 				}
@@ -357,17 +360,17 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ FIX: Soft warning at ~15 seconds
-						if (missingHandsTimerRef.current === 4) {
+						// ✅ FIX: Soft warning toast at ~4 seconds
+						if (missingHandsTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
 							});
-							nextDelay = 1500;
+							nextDelay = 2000;
 						}
-						// ✅ FIX: Hard Strike at ~30 seconds
-						else if (missingHandsTimerRef.current >= 7) {
+						// ✅ FIX: Hard Strike at ~12 seconds
+						else if (missingHandsTimerRef.current >= 6) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -381,7 +384,7 @@ export default function MobileProctorPage() {
 							});
 							missingHandsTimerRef.current = 0;
 						} else {
-							nextDelay = 1500;
+							nextDelay = 2000;
 						}
 					} else {
 						missingHandsTimerRef.current = 0;

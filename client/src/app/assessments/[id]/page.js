@@ -478,7 +478,7 @@ export default function AssessmentEnvironment() {
 				.detectAllFaces(
 					video,
 					new faceapi.TinyFaceDetectorOptions({
-						inputSize: 224,
+						inputSize: 320,
 						scoreThreshold: 0.2,
 					}),
 				)
