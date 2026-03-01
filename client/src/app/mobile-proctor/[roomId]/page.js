@@ -100,8 +100,8 @@ export default function MobileProctorPage() {
 					const stream = await navigator.mediaDevices.getUserMedia({
 						video: {
 							facingMode: "user",
-							width: { ideal: 1280 },
-							height: { ideal: 720 },
+							width: { ideal: 640 },
+							height: { ideal: 480 },
 							// ✅ FIX FOR iOS: Cap framerate to stop Apple's thermal throttling!
 							frameRate: { ideal: 10, max: 15 },
 						},
@@ -179,7 +179,7 @@ export default function MobileProctorPage() {
 				const handModel = handPoseDetection.SupportedModels.MediaPipeHands;
 				const detectorConfig = {
 					runtime: "tfjs",
-					modelType: "full",
+					modelType: "lite",
 					maxHands: 2, // THIS IS THE MAGIC BULLET!
 				};
 				handModelRef.current = await handPoseDetection.createDetector(
@@ -225,7 +225,11 @@ export default function MobileProctorPage() {
 			isScanning = true;
 
 			// CRITICAL FIX: TFJS requires explicit DOM width/height attributes
-			if (!video.width && video.videoWidth) {
+			if (
+				!video.width &&
+				(video.width !== video.videoWidth ||
+					video.height !== video.videoHeight)
+			) {
 				video.width = video.videoWidth;
 				video.height = video.videoHeight;
 			}
