@@ -374,8 +374,8 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
-						if (missingHandsTimerRef.current === 1) {
+						// ✅ STRICTNESS RESTORED: 2 Miss (~8 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
+						if (missingHandsTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
