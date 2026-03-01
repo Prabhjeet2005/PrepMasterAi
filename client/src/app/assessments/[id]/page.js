@@ -813,7 +813,7 @@ export default function AssessmentEnvironment() {
 			if (hasStartedRef.current && !showWarningModalRef.current) {
 				e.preventDefault();
 				e.stopPropagation();
-				toast.error("Copying and Pasting is strictly disabled.");
+				toast.error("Copying and Pasting is strictly disabled.",{id:"copy-paste",duration:3000});
 			}
 		};
 

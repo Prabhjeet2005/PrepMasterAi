@@ -73,20 +73,23 @@ export default function MobileProctorPage() {
 		};
 	}, [roomId]);
 
-	// INSTANT KILL ON BACKGROUNDING
+	// ✅ FIX FOR BUG 1: Downgrade backgrounding to a Soft Warning and hijack the WakeLock
 	useEffect(() => {
-		const handleVisibilityChange = () => {
-			// THE FIX: Only trigger if the document is completely hidden (swapped apps or minimized)
-			if (document.hidden && status === "paired" && socketRef.current && !isGracePeriodRef.current) {
-        socketRef.current.emit("mobile_violation_detected", {
-          roomId,
-          reason: "Mobile browser minimized or backgrounded.",
-        });
-        if (streamRef.current)
-          streamRef.current.getTracks().forEach((track) => track.stop());
-        socketRef.current.disconnect();
-        setStatus("disconnected");
-      }
+		const handleVisibilityChange = async () => {
+			if (document.hidden) {
+				// If the screen dims, just give a soft warning instead of killing the session
+				if (status === "paired" && socketRef.current && !isGracePeriodRef.current) {
+					socketRef.current.emit("mobile_violation_detected", {
+						roomId,
+						reason: "SOFT_WARNING: Mobile screen dimmed. Please tap your phone to keep it awake.",
+					});
+				}
+			} else {
+				// When they tap the screen to wake it up, use that gesture to legally grab the WakeLock!
+				try {
+					if ("wakeLock" in navigator) await navigator.wakeLock.request("screen");
+				} catch (e) {}
+			}
 		};
 
 		document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -316,7 +319,7 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						if (missingFaceTimerRef.current === 1) {
+						if (missingFaceTimerRef.current === 3) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
@@ -393,7 +396,7 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						if (missingHandsTimerRef.current === 2) {
+						if (missingHandsTimerRef.current === 3) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
