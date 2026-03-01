@@ -96,7 +96,7 @@ export default function AssessmentEnvironment() {
 
 	const audioContextRef = useRef(null);
 	const analyserRef = useRef(null);
-	const audioThresholdRef = useRef(35); // Default fallback threshold
+	const audioThresholdRef = useRef(60); // Default fallback threshold
 	const audioStrikeTimerRef = useRef(0);
 
 	const mobileIdentityTimerRef = useRef(0);
@@ -152,7 +152,7 @@ export default function AssessmentEnvironment() {
 
 					// THE FIX: Increased the safety margin to +20, and raised the cap to 80
 					// to easily accommodate noisy environments without false-flagging.
-					const customThreshold = Math.min(avgBaseline + 20, 100);
+					const customThreshold = Math.min(avgBaseline + 30, 90);
 					audioThresholdRef.current = customThreshold;
 
 					console.log(
@@ -324,7 +324,7 @@ export default function AssessmentEnvironment() {
 				laptopStreamRef.current = stream;
 				setLaptopStream(stream);
 			} catch (err) {
-				handleViolation("Laptop Camera/Mic access is mandatory.");
+				handleViolation("Laptop Camera/Mic access is mandatory.",null,"system");
 			}
 		};
 		startLaptopCamera();
@@ -601,7 +601,7 @@ export default function AssessmentEnvironment() {
 
 					// ✅ FIX: Increased to 6 sweeps (~9 seconds). A plate dropping won't last 9 seconds.
 					if (audioStrikeTimerRef.current >= 6) {
-						handleViolation("Continuous background audio detected while lips were closed. Off-camera assistance suspected.");
+						handleViolation("Continuous background audio detected. Off-camera assistance suspected.",null,"system");
 						audioStrikeTimerRef.current = 0;
 					}
 				} else {
@@ -794,7 +794,7 @@ export default function AssessmentEnvironment() {
 				!showWarningModalRef.current
 			) {
 				handleViolation(
-					"Switching tabs or minimizing is strictly prohibited",
+					"Switching tabs or minimizing is strictly prohibited",null,"system"
 				);
 			}
 		};
@@ -805,7 +805,7 @@ export default function AssessmentEnvironment() {
 				hasStartedRef.current &&
 				!showWarningModalRef.current
 			) {
-				handleViolation("Leaving the assessment window is prohibited");
+				handleViolation("Leaving the assessment window is prohibited",null,"system");
 			}
 		};
 

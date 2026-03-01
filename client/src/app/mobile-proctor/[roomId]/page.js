@@ -319,7 +319,7 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						if (missingFaceTimerRef.current === 3) {
+						if (missingFaceTimerRef.current === 2) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
@@ -403,7 +403,7 @@ export default function MobileProctorPage() {
 									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
 							});
 							nextDelay = 4000;
-						} else if (missingHandsTimerRef.current >= 4) {
+						} else if (missingHandsTimerRef.current >= 5) {
 							const evidence = captureEvidence(
 								frameCanvas,
 								null,
