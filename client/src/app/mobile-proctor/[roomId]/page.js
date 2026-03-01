@@ -272,8 +272,8 @@ export default function MobileProctorPage() {
 						.detectSingleFace(
 							video,
 							new faceapi.TinyFaceDetectorOptions({
-								inputSize: 224,
-								scoreThreshold: 0.2, // ✅ FIX: Lowered from 0.3 to 0.2 to catch faces further away
+								inputSize: 224, // ✅ RESTORED: High accuracy maintained
+								scoreThreshold: 0.3, // ✅ RESTORED: Strict confidence required
 							}),
 						)
 						.withFaceLandmarks()
@@ -288,17 +288,15 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						// ✅ FIX FOR iOS: Increased to 3 to absorb WebKit frame drops
-						if (missingFaceTimerRef.current === 3) {
+						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
+						if (missingFaceTimerRef.current === 1) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
-							nextDelay = 2000;
-						}
-						// ✅ FIX: Hard Strike at ~12 seconds
-						else if (missingFaceTimerRef.current >= 6) {
+							nextDelay = 4000; // ✅ FIX: 4-second heartbeat prevents iOS thermal throttling
+						} else if (missingFaceTimerRef.current >= 3) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -312,7 +310,7 @@ export default function MobileProctorPage() {
 							});
 							missingFaceTimerRef.current = 0;
 						} else {
-							nextDelay = 2000;
+							nextDelay = 4000;
 						}
 					}
 				}
@@ -366,17 +364,15 @@ export default function MobileProctorPage() {
 					if (hands.length < 2) {
 						missingHandsTimerRef.current += 1;
 
-						// ✅ FIX FOR iOS: Increased to 3 to absorb WebKit frame drops
-						if (missingHandsTimerRef.current === 3) {
+						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
+						if (missingHandsTimerRef.current === 1) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
 								reason:
 									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
 							});
-							nextDelay = 2000;
-						}
-						// ✅ FIX: Hard Strike at ~12 seconds
-						else if (missingHandsTimerRef.current >= 6) {
+							nextDelay = 4000;
+						} else if (missingHandsTimerRef.current >= 3) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -390,7 +386,7 @@ export default function MobileProctorPage() {
 							});
 							missingHandsTimerRef.current = 0;
 						} else {
-							nextDelay = 2000;
+							nextDelay = 4000; // ✅ FIX: 4-second heartbeat
 						}
 					} else {
 						missingHandsTimerRef.current = 0;
