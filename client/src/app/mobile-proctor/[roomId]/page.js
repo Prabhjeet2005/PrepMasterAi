@@ -51,6 +51,7 @@ export default function MobileProctorPage() {
 				streamRef.current.getTracks().forEach((track) => track.stop());
 		});
 
+		// ✅ FIX FOR BUG 1: Aggressively re-request WakeLock to stop iOS screen dimming
 		const requestWakeLock = async () => {
 			try {
 				if ("wakeLock" in navigator)
@@ -58,6 +59,12 @@ export default function MobileProctorPage() {
 			} catch (err) {}
 		};
 		requestWakeLock();
+		const wakeLockInterval = setInterval(requestWakeLock, 15000);
+
+		// ✅ FIX FOR BUG 2: Aggressive 20-second heartbeat to bypass load balancer timeouts
+		const heartbeatInterval = setInterval(() => {
+			if (socket.connected) socket.emit("ping");
+		}, 20000);
 
 		return () => {
 			socket.disconnect();
@@ -263,6 +270,9 @@ export default function MobileProctorPage() {
 				return canvas.toDataURL("image/jpeg", 0.4); // Compress for socket transit
 			};
 
+			// ✅ FIX FOR BUG 3: Start GPU Memory Scope to prevent the 5-minute Android freeze
+			if (tf) tf.engine().startScope();
+
 			// =====================================
 			// 1. FACE IDENTITY SCANNER
 			// =====================================
@@ -288,7 +298,7 @@ export default function MobileProctorPage() {
 					} else {
 						missingFaceTimerRef.current += 1;
 
-						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~12 seconds) = Strike.
+						// ✅ STRICTNESS RESTORED: 1 Miss (~4 seconds) = Warning. 3 Misses (~16 seconds) = Strike.
 						if (missingFaceTimerRef.current === 1) {
 							socketRef.current.emit("mobile_violation_detected", {
 								roomId,
@@ -296,7 +306,7 @@ export default function MobileProctorPage() {
 									"SOFT_WARNING: Secondary camera obstructed. Please ensure your face is visible.",
 							});
 							nextDelay = 4000; // ✅ FIX: 4-second heartbeat prevents iOS thermal throttling
-						} else if (missingFaceTimerRef.current >= 3) {
+						} else if (missingFaceTimerRef.current >= 4) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -372,7 +382,7 @@ export default function MobileProctorPage() {
 									"SOFT_WARNING: Hand(s) Missing. Please return both hands to the desk.",
 							});
 							nextDelay = 4000;
-						} else if (missingHandsTimerRef.current >= 3) {
+						} else if (missingHandsTimerRef.current >= 4) {
 							const evidence = captureEvidence(
 								video,
 								null,
@@ -396,9 +406,12 @@ export default function MobileProctorPage() {
 				console.warn("Hand AI Skipped:", err.message);
 			}
 
+			// ✅ FIX FOR BUG 3: Clear all GPU Memory after scan
+			if (tf) tf.engine().endScope();
+
 			isScanning = false;
 			scheduleNextScan(nextDelay);
-		};
+		};;;
 
 		// Accepts a dynamic delay parameter
 		const scheduleNextScan = (delay) => {

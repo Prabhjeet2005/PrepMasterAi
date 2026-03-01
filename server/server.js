@@ -48,17 +48,18 @@ app.use("/api/assessment", assessmentRoutes);
 
 // SOCKET
 const io = new Server(server, {
-	cors: {
-		origin:
-			process.env.NODE_ENV === "production"
-				? [
-						"http://localhost:3000",
-						"https://prep-master-ai-client.vercel.app",
-					]
-				: true, // <--- ALLOWS ALL IPs IN DEVELOPMENT
-		methods: ["GET", "POST"],
-		credentials: true,
-	},
+  cors: {
+    origin: process.env.NODE_ENV === "production" 
+      ? [
+          "http://localhost:3000",
+          "https://prep-master-ai-client.vercel.app",
+        ]
+      : true,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  pingTimeout: 60000, // ✅ FIX: Increased to 60 seconds to survive mobile throttling
+  pingInterval: 25000, 
 });
 
 setupSocket(io);
