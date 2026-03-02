@@ -928,29 +928,30 @@ export default function AssessmentEnvironment() {
 	};
 
 	const startAssessment = async () => {
-		// ✅ FIX: Request Fullscreen IMMEDIATELY on line 1, before any 'await' calls!
+		// ✅ 1. IMMEDIATELY grab the screen on the exact millisecond of the click
 		try {
-			if (document.documentElement.requestFullscreen) {
-				await document.documentElement.requestFullscreen();
-			} else if (document.documentElement.webkitRequestFullscreen) {
+			const docElm = document.documentElement;
+			if (docElm.requestFullscreen) {
+				await docElm.requestFullscreen();
+			} else if (docElm.webkitRequestFullscreen) {
 				/* Safari */
-				await document.documentElement.webkitRequestFullscreen();
-			} else if (document.documentElement.msRequestFullscreen) {
+				await docElm.webkitRequestFullscreen();
+			} else if (docElm.msRequestFullscreen) {
 				/* IE11 */
-				await document.documentElement.msRequestFullscreen();
+				await docElm.msRequestFullscreen();
 			}
 		} catch (err) {
-			console.warn(
-				"Fullscreen request failed or was blocked by browser:",
-				err,
+			console.warn("Fullscreen request failed:", err);
+			toast.error(
+				"Browser blocked fullscreen. Please click the button again.",
+				{ id: "fs-err", duration: 4000 },
 			);
-			toast.error("Fullscreen request failed or was blocked by browser", {
-				id: "fullscreen-error",
-				duration: 3000,
-			});
+			return; // Stop the test from starting if we can't get fullscreen
 		}
+
 		if (!faceapi) {
 			toast.error("AI Models are still loading. Please wait a moment.");
+			exitFullscreen(); // Drop fullscreen if they have to wait
 			return;
 		}
 
@@ -968,7 +969,7 @@ export default function AssessmentEnvironment() {
 				throw new Error("Laptop camera feed is not ready.");
 			}
 
-			// 1. Scan the Laptop Camera on-demand
+			// Scan the Laptop Camera on-demand
 			const detections = await faceapi
 				.detectAllFaces(
 					video,
@@ -991,18 +992,16 @@ export default function AssessmentEnvironment() {
 
 			const laptopFace = detections[0].descriptor;
 
-			// 2. Ensure Mobile Phone has sent a scan
+			// Ensure Mobile Phone has sent a scan
 			if (!latestMobileDescriptorRef.current) {
 				toast.error(
 					"Waiting for mobile camera scan. Ensure your face is visible on your phone.",
 					{ id: "mobile-scan-wait", duration: 3000 },
 				);
-				toast.dismiss(toastId);
-				setIsVerifying(false);
-				return;
+				throw new Error("Mobile camera scan pending."); // Break out to the catch block
 			}
 
-			// 3. Compare the two faces
+			// Compare the two faces
 			const distance = faceapi.euclideanDistance(
 				laptopFace,
 				latestMobileDescriptorRef.current,
@@ -1013,60 +1012,44 @@ export default function AssessmentEnvironment() {
 				);
 			}
 
-			// 4. Success! Lock the anchor and enter fullscreen.
+			// ✅ SUCCESS! We are already in fullscreen from Line 1, so just start the test!
 			anchorDescriptorRef.current = laptopFace;
 			console.log("🔒 Identity Verified & Anchor Locked!");
 
-			if (
-				document.fullscreenElement &&
-				window.innerHeight < window.screen.height - 15
-			) {
-				try {
-					await exitFullscreen();
-				} catch (e) {}
-			}
-
-			enterFullscreenAndExecute(
-				() => {
-					toast.dismiss(toastId);
-					setHasStarted(true);
-					setIsFullscreen(true);
-					isFullscreenRef.current = true;
-				},
-				(err) => {
-					toast.dismiss(toastId);
-					toast.error(err);
-				},
-			);
+			toast.dismiss(toastId);
+			setHasStarted(true);
+			setIsFullscreen(true);
+			isFullscreenRef.current = true;
 		} catch (err) {
+			// If ANY verification fails, dismiss the toast, show the error, and DROP fullscreen so they can fix it
 			toast.dismiss(toastId);
 			toast.error(err.message || "Verification failed. Try again.");
+			exitFullscreen();
 		} finally {
 			setIsVerifying(false);
 		}
 	};
 
 	const handleAcknowledgeWarning = async () => {
-		if (
-			document.fullscreenElement &&
-			window.innerHeight < window.screen.height - 15
-		) {
-			try {
-				await exitFullscreen();
-			} catch (e) {}
-		}
+		try {
+			// Request fullscreen instantly on click
+			const docElm = document.documentElement;
+			if (docElm.requestFullscreen) {
+				await docElm.requestFullscreen();
+			} else if (docElm.webkitRequestFullscreen) {
+				await docElm.webkitRequestFullscreen();
+			} else if (docElm.msRequestFullscreen) {
+				await docElm.msRequestFullscreen();
+			}
 
-		enterFullscreenAndExecute(
-			() => {
-				setViolationMessage("");
-				setIsFullscreen(true);
-				isFullscreenRef.current = true;
-				setShowWarningModal(false);
-			},
-			(err) => {
-				toast.error("Some Error Occured");
-			},
-		);
+			// If successful, clear the warning and return to the test!
+			setViolationMessage("");
+			setIsFullscreen(true);
+			isFullscreenRef.current = true;
+			setShowWarningModal(false);
+		} catch (err) {
+			toast.error("Please click anywhere on the page and try again.");
+		}
 	};
 
 	const handleMcqSelect = (optionIndex) => {
