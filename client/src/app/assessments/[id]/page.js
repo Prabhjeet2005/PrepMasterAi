@@ -24,6 +24,8 @@ import {
 	Camera,
 	ShieldCheck,
 	Lock,
+	XCircle,
+	MonitorOff,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -73,6 +75,13 @@ export default function AssessmentEnvironment() {
 	const [isCalibratingAudio, setIsCalibratingAudio] = useState(false);
 	const [violationSource, setViolationSource] = useState("laptop");
 
+	const [isMobileScanReceived, setIsMobileScanReceived] = useState(false);
+	const [laptopPreCheck, setLaptopPreCheck] = useState("checking"); // 'checking', 'ok', 'missing', 'multiple'
+	const [mobilePreCheck, setMobilePreCheck] = useState({
+		face: false,
+		hands: false,
+	});
+
 	const codeRef = useRef(code);
 	const mcqAnswersRef = useRef(mcqAnswers);
 	const isFullscreenRef = useRef(false);
@@ -81,6 +90,8 @@ export default function AssessmentEnvironment() {
 	const isSubmittingRef = useRef(isSubmitting);
 	const showWarningModalRef = useRef(showWarningModal);
 	const socketRef = useRef(null);
+
+	const testStartTimeRef = useRef(0);
 
 	const laptopVideoRef = useRef(null);
 	const laptopStreamRef = useRef(null);
@@ -241,6 +252,7 @@ export default function AssessmentEnvironment() {
 			// ✅ FIX: Increased to 20 seconds to survive aggressive mobile network throttling
 			disconnectTimer = setTimeout(() => {
 				setIsMobileConnected(false);
+				setIsMobileScanReceived(false);
 				if (hasStartedRef.current) {
 					handleViolation(
 						"Mobile camera disconnected! Test environment compromised.",
@@ -256,6 +268,16 @@ export default function AssessmentEnvironment() {
 				typeof payload === "string" ? payload : payload.reason;
 			const evidence =
 				typeof payload === "string" ? null : payload.evidence;
+
+			// ✅ NEW: Silently intercept the UI Pre-Check updates without triggering a strike!
+			if (reason.startsWith("STATUS_UPDATE:")) {
+				const parts = reason.split(":");
+				setMobilePreCheck({
+					face: parts[1] === "TRUE",
+					hands: parts[2] === "TRUE",
+				});
+				return;
+			}
 
 			// ✅ FIX: Intercept Soft Warnings from mobile and fire a Toast instead of a Strike!
 			if (reason.includes("SOFT_WARNING:")) {
@@ -274,6 +296,8 @@ export default function AssessmentEnvironment() {
 
 			// Always save the latest mobile scan so it's ready when they click "Start"
 			latestMobileDescriptorRef.current = mobileDescriptor;
+
+			setIsMobileScanReceived(true);
 
 			if (
 				!hasStartedRef.current ||
@@ -455,6 +479,20 @@ export default function AssessmentEnvironment() {
 				// ✅ ADD THIS LINE
 				laptopObjectDetectorRef.current = await cocoSsd.load();
 
+				// ✅ THE FIX: Secretly warm up the GPU shaders so the first real scan is instant!
+				try {
+					const dummyCanvas = document.createElement("canvas");
+					dummyCanvas.width = 224;
+					dummyCanvas.height = 224;
+					await faceapi.detectSingleFace(
+						dummyCanvas,
+						new faceapi.TinyFaceDetectorOptions(),
+					);
+					await laptopObjectDetectorRef.current.detect(dummyCanvas);
+				} catch (e) {
+					console.warn("Warmup skipped");
+				}
+
 				console.log(
 					"✅ Local Browser AI Vision & Object Detection Loaded",
 				);
@@ -466,6 +504,28 @@ export default function AssessmentEnvironment() {
 
 		if (!isAiReady) loadAiModels();
 	}, [isAiReady]);
+
+	// ✅ NEW: LIVE UI PRE-CHECKER FOR STEP 3
+	useEffect(() => {
+		if (setupStep !== 3 || hasStarted || !isAiReady || !faceapi) return;
+		const video = laptopVideoRef.current;
+
+		const preCheckInterval = setInterval(async () => {
+			if (!video || video.paused || video.ended || video.readyState !== 4)
+				return;
+			try {
+				const detections = await faceapi.detectAllFaces(
+					video,
+					new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 }),
+				);
+				if (detections.length === 1) setLaptopPreCheck("ok");
+				else if (detections.length === 0) setLaptopPreCheck("missing");
+				else setLaptopPreCheck("multiple");
+			} catch (e) {}
+		}, 1000);
+
+		return () => clearInterval(preCheckInterval);
+	}, [setupStep, hasStarted, isAiReady]);
 
 	useEffect(() => {
 		// Only run continuous tracking AFTER the test has officially started
@@ -758,7 +818,14 @@ export default function AssessmentEnvironment() {
 		evidenceImage = null,
 		source = "laptop",
 	) => {
-		if (isSubmittingRef.current || showWarningModalRef.current) return;
+		if (
+			isSubmittingRef.current ||
+			showWarningModalRef.current ||
+			!hasStartedRef.current
+		)
+			return;
+		if (Date.now() - testStartTimeRef.current < 8000) return;
+
 		const now = Date.now();
 		if (now - lastViolationTime.current < 2000) return;
 		lastViolationTime.current = now;
@@ -928,30 +995,8 @@ export default function AssessmentEnvironment() {
 	};
 
 	const startAssessment = async () => {
-		// ✅ 1. IMMEDIATELY grab the screen on the exact millisecond of the click
-		try {
-			const docElm = document.documentElement;
-			if (docElm.requestFullscreen) {
-				await docElm.requestFullscreen();
-			} else if (docElm.webkitRequestFullscreen) {
-				/* Safari */
-				await docElm.webkitRequestFullscreen();
-			} else if (docElm.msRequestFullscreen) {
-				/* IE11 */
-				await docElm.msRequestFullscreen();
-			}
-		} catch (err) {
-			console.warn("Fullscreen request failed:", err);
-			toast.error(
-				"Browser blocked fullscreen. Please click the button again.",
-				{ id: "fs-err", duration: 4000 },
-			);
-			return; // Stop the test from starting if we can't get fullscreen
-		}
-
 		if (!faceapi) {
 			toast.error("AI Models are still loading. Please wait a moment.");
-			exitFullscreen(); // Drop fullscreen if they have to wait
 			return;
 		}
 
@@ -1016,15 +1061,30 @@ export default function AssessmentEnvironment() {
 			anchorDescriptorRef.current = laptopFace;
 			console.log("🔒 Identity Verified & Anchor Locked!");
 
-			toast.dismiss(toastId);
-			setHasStarted(true);
-			setIsFullscreen(true);
-			isFullscreenRef.current = true;
+			// ✅ SECURE FULLSCREEN TRIGGER:
+			// Executing instantly after a fast verification easily beats the 5-second browser security timer.
+			const docElm = document.documentElement;
+			if (docElm.requestFullscreen) {
+				await docElm.requestFullscreen();
+			} else if (docElm.webkitRequestFullscreen) {
+				await docElm.webkitRequestFullscreen();
+			} else if (docElm.msRequestFullscreen) {
+				await docElm.msRequestFullscreen();
+			}
+
+			// ✅ FIX 2: Wait 1 second for the browser's physical expansion animation
+			// to finish BEFORE arming the strict anti-cheat sensors!
+			setTimeout(() => {
+				toast.dismiss(toastId);
+				testStartTimeRef.current = Date.now();
+				setHasStarted(true);
+				setIsFullscreen(true);
+				isFullscreenRef.current = true;
+			}, 1000);
 		} catch (err) {
 			// If ANY verification fails, dismiss the toast, show the error, and DROP fullscreen so they can fix it
 			toast.dismiss(toastId);
 			toast.error(err.message || "Verification failed. Try again.");
-			exitFullscreen();
 		} finally {
 			setIsVerifying(false);
 		}
@@ -1042,11 +1102,13 @@ export default function AssessmentEnvironment() {
 				await docElm.msRequestFullscreen();
 			}
 
-			// If successful, clear the warning and return to the test!
-			setViolationMessage("");
-			setIsFullscreen(true);
-			isFullscreenRef.current = true;
-			setShowWarningModal(false);
+			// ✅ Let the animation finish before clearing the warning screen
+			setTimeout(() => {
+				setViolationMessage("");
+				setIsFullscreen(true);
+				isFullscreenRef.current = true;
+				setShowWarningModal(false);
+			}, 1000);
 		} catch (err) {
 			toast.error("Please click anywhere on the page and try again.");
 		}
@@ -1162,65 +1224,97 @@ export default function AssessmentEnvironment() {
 						{/* PHASE 1: RULES */}
 						{setupStep === 1 && (
 							<div className="flex flex-col items-center text-center animate-in fade-in slide-in-from-bottom-4">
-								<div className="w-16 h-16 bg-red-950/50 text-red-500 border border-red-900 rounded-full flex items-center justify-center mb-6">
+								<div className="w-16 h-16 bg-red-950/50 text-red-500 border border-red-900 rounded-full flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(220,38,38,0.2)]">
 									<AlertTriangle size={32} />
 								</div>
 								<h1 className="text-3xl font-bold mb-4">
-									Environment Requirements
+									Strict Examination Environment
 								</h1>
 								<p className="text-slate-400 mb-8 max-w-lg">
-									This is a strictly proctored assessment. Ensure you are
-									in a quiet room before proceeding.
+									This assessment is continuously monitored by AI across
+									two devices. Please review the mandatory testing rules
+									below.
 								</p>
 
-								<div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 mb-8 text-left w-full max-w-xl">
-									<ul className="text-base text-slate-300 space-y-4">
-										<li className="flex items-start gap-3">
+								<div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 mb-8 text-left w-full max-w-2xl shadow-inner">
+									<ul className="text-sm md:text-base text-slate-300 space-y-5">
+										<li className="flex items-start gap-4">
 											<Lock
-												className="text-blue-400 mt-1 shrink-0"
-												size={18}
+												className="text-blue-400 mt-0.5 shrink-0"
+												size={22}
 											/>
-											<span>
-												Your browser will be locked into{" "}
-												<b>Fullscreen mode</b>.
-											</span>
+											<div>
+												<strong className="text-white">
+													Browser Lockdown:
+												</strong>{" "}
+												The assessment is locked in Fullscreen.
+												Tab-switching, minimizing the window, and
+												Copy/Paste functionality are completely disabled.
+											</div>
 										</li>
-										<li className="flex items-start gap-3">
-											<Lock
-												className="text-blue-400 mt-1 shrink-0"
-												size={18}
+										<li className="flex items-start gap-4">
+											<MonitorOff
+												className="text-yellow-500 mt-0.5 shrink-0"
+												size={22}
 											/>
-											<span>
-												<b>
-													Tab switching, minimizing, or virtual desktops
-												</b>{" "}
-												will result in instant strikes.
-											</span>
+											<div>
+												<strong className="text-white">
+													Clear Background:
+												</strong>{" "}
+												Ensure your testing area is free of TVs, extra
+												monitors, or dark rectangular objects. The AI may
+												falsely flag these shapes as forbidden electronic
+												devices.
+											</div>
 										</li>
-										<li className="flex items-start gap-3">
-											<Lock
-												className="text-blue-400 mt-1 shrink-0"
-												size={18}
-											/>
-											<span>
-												<b>Copy/Paste</b> functionality is disabled.
-											</span>
-										</li>
-										<li className="flex items-start gap-3">
+										<li className="flex items-start gap-4">
 											<Camera
-												className="text-red-400 mt-1 shrink-0"
-												size={18}
+												className="text-purple-400 mt-0.5 shrink-0"
+												size={22}
 											/>
-											<span>
-												Both your <b>Laptop & Mobile Camera</b> must remain
-												active.
-											</span>
+											<div>
+												<strong className="text-white">
+													Face & Identity Tracking:
+												</strong>{" "}
+												You must look directly at the screen. Looking away
+												or having multiple people in the frame will trigger
+												a strike.
+											</div>
+										</li>
+										<li className="flex items-start gap-4">
+											<Smartphone
+												className="text-green-400 mt-0.5 shrink-0"
+												size={22}
+											/>
+											<div>
+												<strong className="text-white">
+													Hand & Object Detection:
+												</strong>{" "}
+												Your mobile camera must be positioned to show your
+												desk. Both hands & Face must be visible at all
+												times. Cell phones, books, and remotes are strictly
+												forbidden.
+											</div>
+										</li>
+										<li className="flex items-start gap-4">
+											<ShieldCheck
+												className="text-red-400 mt-0.5 shrink-0"
+												size={22}
+											/>
+											<div>
+												<strong className="text-white">
+													Audio & Noise Monitoring:
+												</strong>{" "}
+												The room must be completely silent. Background
+												talking, whispering, or ambient noise will be
+												flagged by the audio calibrator.
+											</div>
 										</li>
 									</ul>
 								</div>
 								<button
 									onClick={() => setSetupStep(2)}
-									className="bg-blue-600 w-fit p-4 hover:bg-blue-500 text-white font-bold rounded-xl text-lg transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)]">
+									className="bg-blue-600 w-full max-w-sm p-4 hover:bg-blue-500 text-white font-bold rounded-xl text-lg transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)]">
 									I Agree, Proceed to Setup <ChevronRight size={20} />
 								</button>
 							</div>
@@ -1305,7 +1399,7 @@ export default function AssessmentEnvironment() {
 												Calibrating Audio...
 											</span>
 										) : (
-											<span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-900/30 px-2 py-1 rounded-full">
+											<span className="flex items-center mb-1 gap-1 text-xs font-bold text-green-500 bg-green-900/30 px-2 py-1 rounded-full">
 												<CheckCircle2 size={12} /> Audio Ready
 											</span>
 										)}
@@ -1325,6 +1419,48 @@ export default function AssessmentEnvironment() {
 													Activating...
 												</div>
 											)}
+
+											{/* ✅ LIVE FACE CHECKER UI */}
+											<div className="absolute bottom-3 left-3 bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 shadow-lg border border-slate-700">
+												{laptopPreCheck === "ok" && (
+													<>
+														<CheckCircle2
+															size={16}
+															className="text-green-500"
+														/>{" "}
+														<span className="text-green-400">
+															Face Aligned
+														</span>
+													</>
+												)}
+												{laptopPreCheck === "missing" && (
+													<>
+														<XCircle size={16} className="text-red-500" />{" "}
+														<span className="text-red-400">
+															Face Missing
+														</span>
+													</>
+												)}
+												{laptopPreCheck === "multiple" && (
+													<>
+														<XCircle size={16} className="text-red-500" />{" "}
+														<span className="text-red-400">
+															Multiple Faces
+														</span>
+													</>
+												)}
+												{laptopPreCheck === "checking" && (
+													<>
+														<Loader2
+															size={16}
+															className="animate-spin text-blue-400"
+														/>{" "}
+														<span className="text-slate-300">
+															Scanning...
+														</span>
+													</>
+												)}
+											</div>
 										</div>
 									</div>
 
@@ -1334,17 +1470,14 @@ export default function AssessmentEnvironment() {
 											<Smartphone size={18} className="text-purple-400" />{" "}
 											Secondary Camera (Mobile)
 										</h3>
-										<div className="w-full aspect-video bg-slate-900 border-2 border-dashed border-slate-700 p-4 rounded-xl flex flex-col items-center justify-center relative">
+										<div className="w-full aspect-video mt-auto bg-slate-900 border-2 border-dashed border-slate-700 p-4 rounded-xl flex flex-col items-center justify-center relative">
 											{isMobileConnected ? (
 												<>
 													<div className="w-16 h-16 bg-green-900/20 text-green-500 rounded-full flex items-center justify-center mb-4 border border-green-500/30">
 														<CheckCircle2 size={32} />
 													</div>
 													<span className="font-bold text-green-400 text-lg">
-														Stream Linked Successfully
-													</span>
-													<span className="text-xs text-slate-500 mt-2 font-medium bg-slate-800 px-3 py-1 rounded-full">
-														Preview visible on mobile device
+														Mobile Linked Successfully
 													</span>
 												</>
 											) : (
@@ -1360,6 +1493,69 @@ export default function AssessmentEnvironment() {
 													</span>
 												</>
 											)}
+											{/* ✅ NEW: LIVE HANDS & FACE UI CHECKLIST */}
+											<div className="absolute bottom-3 right-3 bg-slate-900/90 backdrop-blur px-2 py-1 rounded-lg text-sm font-bold flex gap-2 shadow-lg border border-slate-700">
+												{/* ✅ LIVE HANDS & SYNC UI */}
+												<div className="flex items-center gap-2">
+													{isMobileScanReceived ? (
+														<>
+															<CheckCircle2
+																size={16}
+																className="text-green-500"
+															/>{" "}
+															<span className="text-green-400">
+																AI Synced
+															</span>
+														</>
+													) : (
+														<>
+															<Loader2
+																size={16}
+																className="animate-spin text-blue-400"
+															/>{" "}
+															<span className="text-slate-300">
+																Syncing...
+															</span>
+														</>
+													)}
+												</div>
+												<div className="flex items-center gap-2">
+													{mobilePreCheck.face ? (
+														<CheckCircle2
+															size={16}
+															className="text-green-500"
+														/>
+													) : (
+														<XCircle size={16} className="text-red-500" />
+													)}
+													<span
+														className={
+															mobilePreCheck.face
+																? "text-green-400"
+																: "text-red-400"
+														}>
+														Face Visible
+													</span>
+												</div>
+												<div className="flex items-center gap-2">
+													{mobilePreCheck.hands ? (
+														<CheckCircle2
+															size={16}
+															className="text-green-500"
+														/>
+													) : (
+														<XCircle size={16} className="text-red-500" />
+													)}
+													<span
+														className={
+															mobilePreCheck.hands
+																? "text-green-400"
+																: "text-red-400"
+														}>
+														Both Hands
+													</span>
+												</div>
+											</div>
 										</div>
 									</div>
 								</div>
@@ -1367,7 +1563,7 @@ export default function AssessmentEnvironment() {
 								<div className="flex gap-4 w-full justify-center">
 									<button
 										onClick={() => setSetupStep(2)}
-										className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-4 px-8 rounded-xl transition-all">
+										className="bg-slate-800 font-bold py-4 px-8 rounded-xl">
 										Back
 									</button>
 									<button
@@ -1376,9 +1572,13 @@ export default function AssessmentEnvironment() {
 											!laptopStream ||
 											!isMobileConnected ||
 											isVerifying ||
-											isAiLoadingDelay
+											isAiLoadingDelay ||
+											!isMobileScanReceived ||
+											laptopPreCheck !== "ok" ||
+											!mobilePreCheck.face ||
+											!mobilePreCheck.hands
 										}
-										className={`font-bold py-4 px-12 rounded-xl text-xl transition-all flex items-center gap-2 ${laptopStream && isMobileConnected && !isVerifying && !isAiLoadingDelay ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_30px_rgba(22,163,74,0.4)]" : "bg-slate-800 text-slate-600 cursor-not-allowed"}`}>
+										className={`font-bold py-4 px-12 rounded-xl text-lg flex items-center gap-2 ${laptopStream && isMobileConnected && !isVerifying && !isAiLoadingDelay && isMobileScanReceived && laptopPreCheck === "ok" && mobilePreCheck.face && mobilePreCheck.hands ? "bg-green-600 hover:bg-green-500 text-white" : "bg-slate-800 text-slate-500 cursor-not-allowed"}`}>
 										{isVerifying ? (
 											<>
 												<Loader2 className="animate-spin" size={20} />{" "}
@@ -1389,8 +1589,21 @@ export default function AssessmentEnvironment() {
 												<Loader2 className="animate-spin" size={20} />{" "}
 												Initializing AI...
 											</>
-										) : !laptopStream || !isMobileConnected ? (
-											"Waiting for Cameras..."
+										) : !isMobileConnected ? (
+											"Waiting for Mobile..."
+										) : !isMobileScanReceived ? (
+											<>
+												<Loader2 className="animate-spin" size={20} />{" "}
+												Syncing Mobile AI...
+											</>
+										) : laptopPreCheck !== "ok" ? (
+											<>
+												<AlertTriangle size={20} /> Align Laptop Face
+											</>
+										) : !mobilePreCheck.face || !mobilePreCheck.hands ? (
+											<>
+												<AlertTriangle size={20} /> Align Mobile Camera
+											</>
 										) : (
 											"Verify & Start Assessment"
 										)}

@@ -24,3 +24,64 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ==========================================
+   SMOOTH SCROLLING & GLOBAL SCROLLBARS
+   ========================================== */
+
+/* 1. Enable Smooth Scrolling Globally */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 2. Firefox Scrollbar Support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #020617; /* slate-700 thumb, slate-950 track */
+}
+
+/* 3. WebKit (Chrome, Edge, Safari) Global Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #020617; /* Tailwind bg-slate-950 */
+  border-left: 1px solid #0f172a; /* Tailwind border-slate-900 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b; /* Tailwind bg-slate-800 */
+  border-radius: 6px;
+  border: 3px solid #020617; /* Creates a "padded" look around the thumb */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6; /* Tailwind bg-blue-500 to match your primary buttons */
+}
+
+
+/* ==========================================
+   TARGETED COMPONENT SCROLLBARS
+   ========================================== */
+/* You used this class inside your AssessmentEnvironment code */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155; /* Tailwind bg-slate-700 */
+  border-radius: 4px;
+  border: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6; /* Tailwind bg-blue-500 */
+}

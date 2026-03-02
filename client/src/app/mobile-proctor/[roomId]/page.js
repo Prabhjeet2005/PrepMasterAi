@@ -253,6 +253,8 @@ export default function MobileProctorPage() {
 			}
 
 			isScanning = true;
+			let currentFaceFound = false; // ✅ Track Face
+			let currentHandsFound = false; // ✅ Track Hands
 
 			// CRITICAL FIX: TFJS requires explicit DOM width/height attributes
 			if (
@@ -330,6 +332,7 @@ export default function MobileProctorPage() {
 						.withFaceDescriptor();
 
 					if (detection) {
+						currentFaceFound = true;
 						socketRef.current.emit("send_mobile_face_descriptor", {
 							roomId,
 							descriptor: Array.from(detection.descriptor),
@@ -439,6 +442,7 @@ export default function MobileProctorPage() {
 							nextDelay = 4000;
 						}
 					} else {
+						currentHandsFound = true;
 						missingHandsTimerRef.current = 0;
 					}
 				}
@@ -448,6 +452,13 @@ export default function MobileProctorPage() {
 
 			// ✅ Clear all GPU Memory after scan
 			if (tf) tf.engine().endScope();
+
+			if (socketRef.current) {
+				socketRef.current.emit("mobile_violation_detected", {
+					roomId,
+					reason: `STATUS_UPDATE:${currentFaceFound ? "TRUE" : "FALSE"}:${currentHandsFound ? "TRUE" : "FALSE"}`,
+				});
+			}
 
 			isScanning = false;
 			scheduleNextScan(nextDelay);
