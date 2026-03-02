@@ -45,7 +45,7 @@ export const metadata = {
 		siteName: "PrepMaster AI",
 		images: [
 			{
-				url: "https://prep-master-ai-client.vercel.app/og-image.png", // ⚠️ Drop a cool screenshot of your app into your client/public folder and name it og-image.png
+				url: "https://prep-master-ai-client.vercel.app/prep-master-ai-client.vercel.app_.png", // ⚠️ Drop a cool screenshot of your app into your client/public folder and name it og-image.png
 				width: 1200,
 				height: 630,
 				alt: "PrepMaster AI Dashboard",
@@ -61,7 +61,9 @@ export const metadata = {
 		title: "PrepMaster AI | Elite Interview Preparation",
 		description:
 			"Prepare for your dream job with cutting-edge AI mock interviews and secure proctoring.",
-		images: ["https://prep-master-ai-client.vercel.app/og-image.png"], // ⚠️ Change this too
+		images: [
+			"https://prep-master-ai-client.vercel.app/prep-master-ai-client.vercel.app_.png",
+		], // ⚠️ Change this too
 	},
 
 	// This explicitly invites Google's web crawlers to scan your site
