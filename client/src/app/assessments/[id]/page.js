@@ -89,7 +89,7 @@ export default function AssessmentEnvironment() {
 
 	const faceDetectionIntervalRef = useRef(null);
 	const lookAwayTimerRef = useRef(0);
-	const identityMismatchTimerRef = useRef(0); 
+	const identityMismatchTimerRef = useRef(0);
 	const anchorDescriptorRef = useRef(null); // Stores the original face identity
 	const latestMobileDescriptorRef = useRef(null);
 	const laptopObjectDetectorRef = useRef(null);
@@ -324,7 +324,11 @@ export default function AssessmentEnvironment() {
 				laptopStreamRef.current = stream;
 				setLaptopStream(stream);
 			} catch (err) {
-				handleViolation("Laptop Camera/Mic access is mandatory.",null,"system");
+				handleViolation(
+					"Laptop Camera/Mic access is mandatory.",
+					null,
+					"system",
+				);
 			}
 		};
 		startLaptopCamera();
@@ -596,17 +600,28 @@ export default function AssessmentEnvironment() {
 					isVoiceDominant = currentVoiceLevel > backgroundNoiseLevel + 20;
 				}
 
-				if (currentVoiceLevel > audioThresholdRef.current && isVoiceDominant && !isLipsMoving) {
+				if (
+					currentVoiceLevel > audioThresholdRef.current &&
+					isVoiceDominant &&
+					!isLipsMoving
+				) {
 					audioStrikeTimerRef.current += 1;
 
 					// ✅ FIX: Increased to 6 sweeps (~9 seconds). A plate dropping won't last 9 seconds.
 					if (audioStrikeTimerRef.current >= 6) {
-						handleViolation("Continuous background audio detected. Off-camera assistance suspected.",null,"system");
+						handleViolation(
+							"Continuous background audio detected. Off-camera assistance suspected.",
+							null,
+							"system",
+						);
 						audioStrikeTimerRef.current = 0;
 					}
 				} else {
 					// Decrease by 1 so pauses between human words don't clear their strike timer!
-					audioStrikeTimerRef.current = Math.max(0, audioStrikeTimerRef.current - 1);
+					audioStrikeTimerRef.current = Math.max(
+						0,
+						audioStrikeTimerRef.current - 1,
+					);
 				}
 			}
 
@@ -738,7 +753,11 @@ export default function AssessmentEnvironment() {
 		}
 	};
 
-	const handleViolation = (reason, evidenceImage = null, source = "laptop") => {
+	const handleViolation = (
+		reason,
+		evidenceImage = null,
+		source = "laptop",
+	) => {
 		if (isSubmittingRef.current || showWarningModalRef.current) return;
 		const now = Date.now();
 		if (now - lastViolationTime.current < 2000) return;
@@ -781,7 +800,7 @@ export default function AssessmentEnvironment() {
 			if (!checkIsFullscreen()) {
 				isFullscreenRef.current = false;
 				setIsFullscreen(false);
-				handleViolation("Exited Fullscreen mode",null,"system");
+				handleViolation("Exited Fullscreen mode", null, "system");
 			}
 		};
 
@@ -794,7 +813,9 @@ export default function AssessmentEnvironment() {
 				!showWarningModalRef.current
 			) {
 				handleViolation(
-					"Switching tabs or minimizing is strictly prohibited",null,"system"
+					"Switching tabs or minimizing is strictly prohibited",
+					null,
+					"system",
 				);
 			}
 		};
@@ -805,7 +826,11 @@ export default function AssessmentEnvironment() {
 				hasStartedRef.current &&
 				!showWarningModalRef.current
 			) {
-				handleViolation("Leaving the assessment window is prohibited",null,"system");
+				handleViolation(
+					"Leaving the assessment window is prohibited",
+					null,
+					"system",
+				);
 			}
 		};
 
@@ -813,7 +838,10 @@ export default function AssessmentEnvironment() {
 			if (hasStartedRef.current && !showWarningModalRef.current) {
 				e.preventDefault();
 				e.stopPropagation();
-				toast.error("Copying and Pasting is strictly disabled.",{id:"copy-paste",duration:3000});
+				toast.error("Copying and Pasting is strictly disabled.", {
+					id: "copy-paste",
+					duration: 3000,
+				});
 			}
 		};
 
@@ -900,6 +928,27 @@ export default function AssessmentEnvironment() {
 	};
 
 	const startAssessment = async () => {
+		// ✅ FIX: Request Fullscreen IMMEDIATELY on line 1, before any 'await' calls!
+		try {
+			if (document.documentElement.requestFullscreen) {
+				await document.documentElement.requestFullscreen();
+			} else if (document.documentElement.webkitRequestFullscreen) {
+				/* Safari */
+				await document.documentElement.webkitRequestFullscreen();
+			} else if (document.documentElement.msRequestFullscreen) {
+				/* IE11 */
+				await document.documentElement.msRequestFullscreen();
+			}
+		} catch (err) {
+			console.warn(
+				"Fullscreen request failed or was blocked by browser:",
+				err,
+			);
+			toast.error("Fullscreen request failed or was blocked by browser", {
+				id: "fullscreen-error",
+				duration: 3000,
+			});
+		}
 		if (!faceapi) {
 			toast.error("AI Models are still loading. Please wait a moment.");
 			return;
