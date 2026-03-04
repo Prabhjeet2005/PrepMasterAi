@@ -1,0 +1,17 @@
+# docker-compose.yml
+services:
+  backend:
+    build: ./server
+    ports:
+      - "5001:5001" 
+    env_file:
+      - ./server/.env
+  
+  frontend:
+    build: ./client
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./client/.env.local
+    depends_on:
+      - backend
