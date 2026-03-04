@@ -2,6 +2,8 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import axios from "axios";
 
+axios.defaults.withCredentials = true;
+
 export const AuthContext = createContext();
 
 // Custom hook to make it easy to use anywhere
@@ -33,6 +35,17 @@ export const AuthContextProvider = ({ children }) => {
 		};
 
 		checkUser();
+	}, []);
+
+	useEffect(() => {
+		console.log(
+			"%c⚠️ STOP!",
+			"color: red; font-size: 30px; font-weight: bold;",
+		);
+		console.log(
+			"%cThis AI Proctoring Engine is the original portfolio work of Prabhjeet Singh Sandhu. Unauthorized copying or academic submission is strictly prohibited.",
+			"font-size: 16px;",
+		);
 	}, []);
 
 	return (

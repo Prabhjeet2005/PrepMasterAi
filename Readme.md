@@ -44,7 +44,7 @@ PrepMasterAi is a highly scalable, real-time AI interview platform engineered to
 
 ### Prerequisites
 To run this application locally, ensure you have the following installed:
-* [Node.js](https://nodejs.org/en/) (v18 or higher)
+* [Node.js](https://nodejs.org/en/) (v20 or higher)
 * [Docker Desktop](https://www.docker.com/products/docker-desktop) (For containerized setup)
 * A MongoDB cluster URI
 
@@ -102,3 +102,32 @@ FRONTEND_URL='http://localhost:3000'
 NEXT_PUBLIC_SERVER_URL='http://localhost:5001'
 NEXT_PUBLIC_SOCKET_URL='http://localhost:5001'
 ```
+
+## 📱 Mobile Camera Proctoring (Local Network Testing)
+
+PrepMasterAi utilizes WebRTC and `navigator.mediaDevices.getUserMedia()` for the dual-device camera synchronization. Modern browsers strictly block camera access on `http://` protocols unless the domain is `localhost`. 
+
+To test the mobile proctoring feature across your local Wi-Fi network, you must align your IP address and bypass browser security constraints.
+
+**Step 1: Identify your Local IPv4 Address**
+Find your machine's local IP address (e.g., `192.168.1.8`). 
+* *Note: If your router uses dynamic DHCP, this IP may change periodically. You must update the following steps whenever your IP changes.*
+
+**Step 2: Update Environment Variables**
+Update your Next.js `.env.local` file to point to your network IP rather than localhost:
+\`\`\`env
+NEXT_PUBLIC_SERVER_URL='http://192.168.1.8:8000'
+NEXT_PUBLIC_SOCKET_URL='http://192.168.1.8:8000'
+\`\`\`
+*(Restart your Docker containers after updating this file).*
+
+**Step 3: Allow Insecure Origins in Chrome**
+Because you are accessing the site via `http://192.168.1.8`, Chrome will block the camera on both your laptop and your mobile device. You must explicitly whitelist your IP.
+
+1. Open Google Chrome on **both your Laptop and your Android device**.
+2. Type `chrome://flags` in the URL bar.
+3. Search for: **Insecure origins treated as secure**
+4. Enable the flag and paste your exact frontend address in the text box (e.g., `http://192.168.1.8:3000`).
+5. Click **Relaunch** at the bottom of the screen.
+
+You can now navigate to `http://192.168.1.8:3000` on both devices, log in, and the WebRTC WebSocket handshake will successfully synchronize your mobile camera.

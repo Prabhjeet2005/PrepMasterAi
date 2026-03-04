@@ -11,7 +11,7 @@ services:
     build: ./client
     ports:
       - "3000:3000"
-    env_file:
-      - ./client/.env.local
     depends_on:
       - backend
+    env_file:
+      - ./client/.env.local

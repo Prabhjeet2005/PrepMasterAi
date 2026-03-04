@@ -221,6 +221,14 @@ export default function Sidebar() {
 						</div>
 					)}
 				</div>
+				{/* Add this right before the closing </aside> or main container div */}
+				<div className="mt-auto p-4 text-center text-xs text-gray-500 border-t border-gray-600">
+					Designed & Engineered by
+					<br />
+					<span className="font-semibold text-gray-600">
+						Prabhjeet Singh Sandhu
+					</span>
+				</div>
 			</aside>
 		</>
 	);
